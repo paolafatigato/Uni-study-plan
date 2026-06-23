@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StudyMap — Planner Universitario</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,500;0,9..40,700;1,9..40,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- LOGIN SCREEN -->
+<div id="loginScreen" class="login-screen">
+  <div class="login-card">
+    <div class="login-logo">📚</div>
+    <h1 class="login-title">StudyMap</h1>
+    <p class="login-subtitle">Il tuo planner universitario</p>
+    <button class="btn-google" id="btnGoogleLogin">
+      <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8c-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4C12.955 4 4 12.955 4 24s8.955 20 20 20s20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/><path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4C16.318 4 9.656 8.337 6.306 14.691z"/><path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"/><path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002l6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"/></svg>
+      Accedi con Google
+    </button>
+    <p class="login-note">I tuoi dati vengono salvati su Firebase e sono accessibili da qualsiasi dispositivo.</p>
+  </div>
+</div>
+
+<!-- SIDEBAR -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-header">
+    <div class="logo">
+      <span class="logo-icon">📚</span>
+      <span class="logo-text">StudyMap</span>
+    </div>
+    <button class="sidebar-toggle" id="sidebarToggle">‹</button>
+  </div>
+
+  <nav class="sidebar-nav">
+    <button class="nav-btn active" data-view="dashboard"><span class="nav-icon">🏠</span><span class="nav-label">Dashboard</span></button>
+    <button class="nav-btn" data-view="esami"><span class="nav-icon">🎓</span><span class="nav-label">Esami</span></button>
+    <button class="nav-btn" data-view="piani"><span class="nav-icon">📋</span><span class="nav-label">Piani di Studio</span></button>
+    <button class="nav-btn" data-view="calendario"><span class="nav-icon">📅</span><span class="nav-label">Calendario</span></button>
+    <button class="nav-btn" data-view="tesi"><span class="nav-icon">📝</span><span class="nav-label">Tesi & Progetti</span></button>
+  </nav>
+
+  <div class="sidebar-exams" id="sidebarExams">
+    <p class="sidebar-section-label">I TUOI ESAMI</p>
+    <div id="examList"></div>
+    <button class="btn-add-exam" id="btnAddExam">+ Nuovo esame</button>
+  </div>
+
+  <div class="sidebar-user" id="sidebarUser">
+    <img id="userAvatar" class="user-avatar" src="" alt="">
+    <span class="user-name" id="userName"></span>
+    <button class="btn-logout" id="btnLogout" title="Esci">⏏</button>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<main class="main" id="main">
+
+  <!-- DASHBOARD -->
+  <section class="view active" id="view-dashboard">
+    <header class="page-header">
+      <div>
+        <h1 id="dashGreeting">Ciao! 👋</h1>
+        <p class="subtitle">Ecco il tuo studio di oggi</p>
+      </div>
+      <div class="header-date" id="headerDate"></div>
+    </header>
+    <div class="dashboard-grid">
+      <div class="dash-card dash-today"><h3>📖 Da fare oggi</h3><div id="todayTasks"></div></div>
+      <div class="dash-card dash-progress"><h3>📊 Avanzamento generale</h3><div id="progressBars"></div></div>
+      <div class="dash-card dash-upcoming"><h3>🗓️ Prossimi appelli</h3><div id="upcomingExams"></div></div>
+    </div>
+  </section>
+
+  <!-- ESAMI -->
+  <section class="view" id="view-esami">
+    <header class="page-header">
+      <div><h1>🎓 Esami</h1><p class="subtitle">Gestisci libri, slides e videolezioni</p></div>
+      <button class="btn-primary" id="btnAddExam2">+ Nuovo esame</button>
+    </header>
+    <div id="examsGrid" class="exams-grid"></div>
+  </section>
+
+  <!-- PIANI DI STUDIO -->
+  <section class="view" id="view-piani">
+    <header class="page-header">
+      <div>
+        <h1>📋 Piani di Studio</h1>
+        <p class="subtitle">Definisci cosa studiare in ogni periodo. Il calendario userà questi piani per distribuire le pagine.</p>
+      </div>
+      <button class="btn-primary" id="btnAddPlan">+ Nuovo piano</button>
+    </header>
+    <div class="plans-explainer">
+      <span>💡</span>
+      <div>
+        <strong>Come funziona:</strong> crea un piano per un periodo (es. "Luglio — solo Psicologia"), seleziona le materie/libri attivi.
+        Il calendario calcolerà le pagine giornaliere <em>solo</em> per quei materiali.
+        Puoi poi fare un override per singoli giorni direttamente dal pannello del giorno.
+      </div>
+    </div>
+    <div id="plansGrid" class="plans-grid"></div>
+  </section>
+
+  <!-- CALENDARIO -->
+  <section class="view" id="view-calendario">
+    <header class="page-header">
+      <div><h1>📅 Calendario Studio</h1><p class="subtitle">Clicca un giorno per vedere i dettagli o modificare. I giorni colorati sono quelli dei tuoi Piani di Studio.</p></div>
+      <button class="btn-ghost" onclick="document.querySelector('[data-view=piani]').click()" style="font-size:13px">📋 Gestisci piani</button>
+    </header>
+    <div class="calendar-layout">
+      <div class="calendar-left">
+        <div class="cal-nav">
+          <button class="cal-arrow" id="calPrev">‹</button>
+          <span class="cal-month" id="calMonthLabel"></span>
+          <button class="cal-arrow" id="calNext">›</button>
+        </div>
+        <div class="cal-grid" id="calGrid"></div>
+      </div>
+      <div class="calendar-right">
+        <div class="day-panel" id="dayPanel">
+          <p class="day-panel-placeholder">← Clicca un giorno per vedere il dettaglio</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TESI & PROGETTI -->
+  <section class="view" id="view-tesi">
+    <header class="page-header">
+      <div><h1>📝 Tesi & Progetti</h1><p class="subtitle">Traccia capitoli da leggere, scrivere e pianificare</p></div>
+      <button class="btn-primary" id="btnAddProject">+ Nuovo progetto</button>
+    </header>
+    <div id="projectsGrid" class="projects-grid"></div>
+  </section>
+
+</main>
+
+<!-- ===== MODALI ===== -->
+
+<!-- Modal: Esame -->
+<div class="modal-overlay" id="examModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="examModalTitle">Nuovo Esame</h2>
+      <button class="modal-close" data-close="examModal">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group"><label>Nome esame</label><input type="text" id="examName" placeholder="es. Psicologia Cognitiva"></div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1.5">
+          <label>Colore</label>
+          <div class="color-picker-wrap">
+            <div class="color-picker" id="colorPicker"></div>
+            <div class="custom-color-row">
+              <label style="font-size:12px;color:var(--ink-light);margin-right:6px">Custom:</label>
+              <input type="color" id="examCustomColor" value="#ff0022" class="input-color-native">
+              <button class="btn-ghost" style="font-size:12px;padding:4px 10px" id="applyCustomColor">Usa</button>
+            </div>
+          </div>
+        </div>
+        <div class="form-group" style="flex:2"><label>Link Moodle</label><input type="url" id="examMoodle" placeholder="https://moodle..."></div>
+      </div>
+      <div class="form-section-title">📅 Appelli d'esame</div>
+      <div id="appellDates" class="appell-list"></div>
+      <button class="btn-ghost" id="addAppellBtn">+ Aggiungi appello</button>
+      <div class="form-section-title">📚 Libri</div>
+      <div id="booksList" class="books-list"></div>
+      <button class="btn-ghost" id="addBookBtn">+ Aggiungi libro</button>
+      <div class="form-section-title">🖥️ Materiali extra</div>
+      <div class="form-row">
+        <div class="form-group checkbox-group">
+          <label><input type="checkbox" id="hasSlidesi"> Slides</label>
+          <div id="slidesDetail" class="sub-detail hidden">
+            <input type="number" id="slidesTotal" placeholder="Totale slides">
+            <input type="number" id="slidesDone" placeholder="Fatte">
+          </div>
+        </div>
+        <div class="form-group checkbox-group">
+          <label><input type="checkbox" id="hasVideo"> Videolezioni</label>
+          <div id="videoDetail" class="sub-detail hidden">
+            <input type="number" id="videoTotal" placeholder="Totale (min)">
+            <input type="number" id="videoDone" placeholder="Viste (min)">
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" data-close="examModal">Annulla</button>
+      <button class="btn-primary" id="saveExamBtn">Salva esame</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Piano di Studio -->
+<div class="modal-overlay" id="planModal">
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <h2 id="planModalTitle">Nuovo Piano di Studio</h2>
+      <button class="modal-close" data-close="planModal">✕</button>
+    </div>
+    <div class="modal-body">
+
+      <!-- Nome -->
+      <div class="form-group">
+        <label>Nome piano</label>
+        <input type="text" id="planLabel" placeholder="es. Luglio — Clinica">
+      </div>
+
+      <!-- Periodi con giorni -->
+      <div class="form-section-title">📅 Periodi e giorni di studio</div>
+      <p style="font-size:13px;color:var(--ink-light);margin-bottom:12px">
+        Aggiungi uno o più intervalli. Per ogni intervallo puoi escludere weekend o singoli giorni della settimana.
+      </p>
+      <div id="scheduleRulesList"></div>
+      <button class="btn-ghost" id="addScheduleRuleBtn" style="margin-bottom:4px">+ Aggiungi intervallo</button>
+
+      <!-- Materiali -->
+      <div class="form-section-title" style="margin-top:20px">📚 Materie e materiali attivi</div>
+      <p style="font-size:13px;color:var(--ink-light);margin-bottom:12px">
+        Spunta solo quello che vuoi studiare in questo piano.
+      </p>
+      <div id="planItemPicker" class="plan-item-picker"></div>
+
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" data-close="planModal">Annulla</button>
+      <button class="btn-primary" id="savePlanBtn">Salva piano</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Progresso libro -->
+<div class="modal-overlay" id="progressModal">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <h2 id="progressModalTitle">Aggiorna progresso</h2>
+      <button class="modal-close" data-close="progressModal">✕</button>
+    </div>
+    <div class="modal-body" id="progressModalBody"></div>
+    <div class="modal-footer">
+      <button class="btn-ghost" data-close="progressModal">Annulla</button>
+      <button class="btn-primary" id="saveProgressBtn">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Progetto -->
+<div class="modal-overlay" id="projectModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="projectModalTitle">Nuovo Progetto</h2>
+      <button class="modal-close" data-close="projectModal">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group"><label>Nome progetto</label><input type="text" id="projectName" placeholder="es. Tesi magistrale"></div>
+      <div class="form-row">
+        <div class="form-group"><label>Tipo</label><select id="projectType"><option value="tesi">Tesi</option><option value="elaborato">Elaborato</option><option value="ricerca">Ricerca</option><option value="altro">Altro</option></select></div>
+        <div class="form-group">
+          <label>Colore</label>
+          <div class="color-picker-wrap">
+            <div class="color-picker" id="projectColorPicker"></div>
+            <div class="custom-color-row">
+              <label style="font-size:12px;color:var(--ink-light);margin-right:6px">Custom:</label>
+              <input type="color" id="projectCustomColor" value="#3548c0" class="input-color-native">
+              <button class="btn-ghost" style="font-size:12px;padding:4px 10px" id="applyProjectCustomColor">Usa</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="form-section-title">📖 Da leggere</div>
+      <div class="form-row">
+        <div class="form-group"><label>Cap. totali</label><input type="number" id="readChapTotal" placeholder="0"></div>
+        <div class="form-group"><label>Cap. letti</label><input type="number" id="readChapDone" placeholder="0"></div>
+        <div class="form-group"><label>Pag. totali</label><input type="number" id="readPagesTotal" placeholder="0"></div>
+        <div class="form-group"><label>Pag. lette</label><input type="number" id="readPagesDone" placeholder="0"></div>
+      </div>
+      <div class="form-section-title">✍️ Da scrivere</div>
+      <div class="form-row">
+        <div class="form-group"><label>Cap. totali</label><input type="number" id="writeChapTotal" placeholder="0"></div>
+        <div class="form-group"><label>Cap. scritti</label><input type="number" id="writeChapDone" placeholder="0"></div>
+        <div class="form-group"><label>Pag. totali</label><input type="number" id="writePagesTotal" placeholder="0"></div>
+        <div class="form-group"><label>Pag. scritte</label><input type="number" id="writePagesDone" placeholder="0"></div>
+      </div>
+      <div class="form-section-title">🗂️ Da pianificare</div>
+      <div id="projectTasks" class="project-tasks-list"></div>
+      <button class="btn-ghost" id="addProjectTaskBtn">+ Aggiungi task</button>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" data-close="projectModal">Annulla</button>
+      <button class="btn-primary" id="saveProjectBtn">Salva progetto</button>
+    </div>
+  </div>
+</div>
+
+<div id="syncIndicator" class="sync-indicator hidden">
+  <span class="sync-dot"></span><span id="syncMsg">Salvataggio...</span>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

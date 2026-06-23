@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <title>StudyMap — Migrazione Dati</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: #faf9f7;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 4px 32px rgba(26,20,16,0.12);
+      padding: 36px 40px;
+      max-width: 640px;
+      width: 100%;
+    }
+    h1 { font-size: 24px; margin-bottom: 6px; color: #1a1410; }
+    .subtitle { color: #8a7f79; font-size: 14px; margin-bottom: 28px; }
+    .step {
+      background: #faf9f7;
+      border: 1px solid #e0d8d0;
+      border-radius: 10px;
+      padding: 16px 18px;
+      margin-bottom: 12px;
+    }
+    .step-num {
+      display: inline-block;
+      background: #ff0022;
+      color: #fff;
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      font-size: 12px; font-weight: 700;
+      text-align: center; line-height: 22px;
+      margin-right: 8px;
+      flex-shrink: 0;
+    }
+    .step-title { font-weight: 600; font-size: 14px; color: #1a1410; display: flex; align-items: center; margin-bottom: 8px; }
+    .step-body { font-size: 13px; color: #4a3f38; line-height: 1.5; }
+    .data-preview {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      background: #1a1410;
+      color: #a1bef8;
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-top: 10px;
+      max-height: 160px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.15s;
+    }
+    .btn-primary { background: #ff0022; color: #fff; }
+    .btn-primary:hover { background: #c8001a; transform: translateY(-1px); }
+    .btn-primary:disabled { background: #ccc; cursor: not-allowed; transform: none; }
+    .btn-ghost { background: none; color: #4a3f38; border: 1.5px solid #e0d8d0; }
+    .btn-ghost:hover { border-color: #ff0022; color: #ff0022; }
+    .btn-success { background: #5c946e; color: #fff; }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-top: 12px;
+    }
+    .status.ok    { background: #e8f5e9; color: #2e7d32; }
+    .status.error { background: #ffebee; color: #c62828; }
+    .status.info  { background: #e3f2fd; color: #1565c0; }
+    .status.warn  { background: #fff8e1; color: #7a5c00; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 700;
+      background: #ffe5e9;
+      color: #ff0022;
+      margin-left: 6px;
+    }
+    .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    .divider { border: none; border-top: 1px solid #e0d8d0; margin: 20px 0; }
+    .google-btn {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 20px;
+      background: #fff;
+      border: 1.5px solid #e0d8d0;
+      border-radius: 8px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      width: 100%;
+      justify-content: center;
+    }
+    .google-btn:hover { border-color: #ff0022; background: #fff5f5; }
+    #logArea {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      background: #1a1410;
+      color: #fff088;
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-top: 10px;
+      max-height: 200px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      display: none;
+    }
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h1>🚀 StudyMap — Migrazione Dati</h1>
+  <p class="subtitle">Sposta i tuoi esami dal localStorage al tuo profilo Firebase in un click.</p>
+
+  <!-- STEP 1: Leggi localStorage -->
+  <div class="step">
+    <div class="step-title"><span class="step-num">1</span> Dati trovati nel browser</div>
+    <div class="step-body" id="localDataInfo">Analisi in corso...</div>
+    <div id="dataPreview" class="data-preview" style="display:none"></div>
+  </div>
+
+  <!-- STEP 2: Login Google -->
+  <div class="step">
+    <div class="step-title"><span class="step-num">2</span> Accedi con il tuo account Google</div>
+    <div class="step-body" style="margin-bottom:12px">Usa lo stesso account con cui usi StudyMap.</div>
+    <button class="google-btn" id="btnLogin">
+      <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8c-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4C12.955 4 4 12.955 4 24s8.955 20 20 20s20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/><path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4C16.318 4 9.656 8.337 6.306 14.691z"/><path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"/><path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002l6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"/></svg>
+      Accedi con Google
+    </button>
+    <div id="loginStatus"></div>
+  </div>
+
+  <!-- STEP 3: Migra -->
+  <div class="step">
+    <div class="step-title"><span class="step-num">3</span> Migra su Firebase</div>
+    <div class="step-body" style="margin-bottom:12px">
+      Carica tutti i tuoi esami, piani e calendario sul cloud. I dati esistenti su Firebase verranno <strong>uniti</strong> (non sovrascritti), quindi nulla andrà perso.
+    </div>
+    <div class="actions">
+      <button class="btn btn-primary" id="btnMigrate" disabled>
+        ☁️ Migra su Firebase
+      </button>
+      <button class="btn btn-ghost" id="btnMerge" disabled>
+        🔀 Unisci con dati cloud
+      </button>
+    </div>
+    <div id="logArea"></div>
+    <div id="migrateStatus"></div>
+  </div>
+
+  <hr class="divider">
+  <p style="font-size:12px;color:#8a7f79;text-align:center">
+    Questo strumento non modifica né elimina i dati dal tuo browser.
+    Puoi riaprirlo quante volte vuoi in sicurezza.
+  </p>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getFirestore, doc, getDoc, setDoc }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBo95-iAXID2q5qfc8B2bLIlRA83u0-3Mo",
+  authDomain: "uni-study-plan.firebaseapp.com",
+  projectId: "uni-study-plan",
+  storageBucket: "uni-study-plan.firebasestorage.app",
+  messagingSenderId: "257253916300",
+  appId: "1:257253916300:web:6958a566aed513d68445a9"
+};
+
+const fbApp = initializeApp(firebaseConfig);
+const auth  = getAuth(fbApp);
+const db    = getFirestore(fbApp);
+
+let localData = {};
+let currentUser = null;
+
+const log = (msg, color='#fff088') => {
+  const area = document.getElementById('logArea');
+  area.style.display = 'block';
+  area.innerHTML += `<span style="color:${color}">${new Date().toLocaleTimeString()} — ${msg}\n</span>`;
+  area.scrollTop = area.scrollHeight;
+};
+
+const setStatus = (id, type, msg) => {
+  document.getElementById(id).innerHTML = `<div class="status ${type}">${msg}</div>`;
+};
+
+// ===== STEP 1: read localStorage =====
+function readLocalStorage() {
+  const KEYS = {
+    exams:      ['studymap_exams',    'exams'],
+    projects:   ['studymap_projects', 'projects'],
+    calendar:   ['studymap_calendar', 'calendar'],
+    studyPlans: ['studymap_studyPlans', 'studyPlans'],
+  };
+
+  let found = {};
+  let missing = [];
+
+  for (const [field, [key1, key2]] of Object.entries(KEYS)) {
+    // Try both old and new key names
+    let raw = localStorage.getItem(key1) || localStorage.getItem(key2);
+    if (raw) {
+      try { found[field] = JSON.parse(raw); }
+      catch { found[field] = []; }
+    } else {
+      found[field] = field === 'calendar' ? {} : [];
+      missing.push(field);
+    }
+  }
+
+  return { found, missing };
+}
+
+const { found, missing } = readLocalStorage();
+localData = found;
+
+const examCount    = (found.exams    || []).length;
+const projectCount = (found.projects || []).length;
+const calDays      = Object.keys(found.calendar || {}).length;
+const planCount    = (found.studyPlans || []).length;
+
+const infoEl = document.getElementById('localDataInfo');
+if (examCount === 0 && projectCount === 0 && calDays === 0) {
+  infoEl.innerHTML = `
+    <div class="status warn">⚠️ Nessun dato trovato nel localStorage di questo browser.
+    Assicurati di aprire questa pagina nello stesso browser dove usi StudyMap (stessa finestra, stesso profilo Chrome/Firefox).</div>
+    <div style="margin-top:10px;font-size:12px;color:#8a7f79">
+    <strong>Alternativa:</strong> apri la console del browser (F12 → Console) e incolla:
+    <div class="data-preview">Object.keys(localStorage).filter(k => k.includes('studymap') || k.includes('exams'))</div>
+    </div>`;
+} else {
+  infoEl.innerHTML = `
+    ✅ Trovati: <strong>${examCount} esami</strong>,
+    <strong>${projectCount} progetti</strong>,
+    <strong>${calDays} giorni calendario</strong>,
+    <strong>${planCount} piani di studio</strong>`;
+
+  // Preview
+  const preview = document.getElementById('dataPreview');
+  preview.style.display = 'block';
+  preview.textContent = JSON.stringify({
+    exams: (found.exams||[]).map(e => ({ id:e.id, name:e.name, books:(e.books||[]).length+' libri' })),
+    projects: (found.projects||[]).map(p => p.name),
+    calendarDays: calDays,
+    plans: (found.studyPlans||[]).map(p => p.label||p.id),
+  }, null, 2);
+}
+
+// ===== STEP 2: Auth =====
+const provider = new GoogleAuthProvider();
+
+document.getElementById('btnLogin').addEventListener('click', async () => {
+  try {
+    await signInWithPopup(auth, provider);
+  } catch(e) {
+    setStatus('loginStatus', 'error', '❌ Errore: ' + e.message);
+  }
+});
+
+onAuthStateChanged(auth, user => {
+  if (user) {
+    currentUser = user;
+    document.getElementById('btnLogin').textContent = `✅ Connesso come ${user.displayName || user.email}`;
+    document.getElementById('btnLogin').style.background = '#e8f5e9';
+    setStatus('loginStatus', 'ok', `✅ Account: ${user.displayName} (${user.email})`);
+    document.getElementById('btnMigrate').disabled = false;
+    document.getElementById('btnMerge').disabled = false;
+  }
+});
+
+// ===== STEP 3: Migrate (overwrite) =====
+document.getElementById('btnMigrate').addEventListener('click', async () => {
+  if (!currentUser) { alert('Prima fai il login!'); return; }
+  if (!confirm(`Stai per caricare ${examCount} esami su Firebase per l'account ${currentUser.email}.\n\nI dati attualmente su Firebase verranno SOSTITUITI. Continuare?`)) return;
+  await doMigrate(false);
+});
+
+// ===== STEP 3b: Merge (add missing) =====
+document.getElementById('btnMerge').addEventListener('click', async () => {
+  if (!currentUser) { alert('Prima fai il login!'); return; }
+  await doMigrate(true);
+});
+
+async function doMigrate(merge) {
+  const btn = document.getElementById('btnMigrate');
+  const btnM = document.getElementById('btnMerge');
+  btn.innerHTML = '<span class="spinner"></span> Caricamento...';
+  btn.disabled = true; btnM.disabled = true;
+
+  log('Inizio migrazione...', '#a1bef8');
+
+  try {
+    const ref = doc(db, 'users', currentUser.uid);
+    let dataToSave = { ...localData, updatedAt: Date.now() };
+
+    if (merge) {
+      log('Leggo dati esistenti su Firebase...', '#fff088');
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        const cloud = snap.data();
+        log(`Cloud: ${(cloud.exams||[]).length} esami, ${(cloud.projects||[]).length} progetti`, '#5c946e');
+
+        // Merge: add local exams not in cloud (by id)
+        const cloudExamIds = new Set((cloud.exams||[]).map(e=>e.id));
+        const newExams = (localData.exams||[]).filter(e=>!cloudExamIds.has(e.id));
+        const mergedExams = [...(cloud.exams||[]), ...newExams];
+
+        const cloudProjIds = new Set((cloud.projects||[]).map(p=>p.id));
+        const newProjects = (localData.projects||[]).filter(p=>!cloudProjIds.has(p.id));
+        const mergedProjects = [...(cloud.projects||[]), ...newProjects];
+
+        const mergedCalendar = { ...(localData.calendar||{}), ...(cloud.calendar||{}) };
+        const cloudPlanIds = new Set((cloud.studyPlans||[]).map(p=>p.id));
+        const newPlans = (localData.studyPlans||[]).filter(p=>!cloudPlanIds.has(p.id));
+        const mergedPlans = [...(cloud.studyPlans||[]), ...newPlans];
+
+        log(`Aggiungo ${newExams.length} nuovi esami locali`, '#fff088');
+        log(`Aggiungo ${newProjects.length} nuovi progetti locali`, '#fff088');
+        log(`Unisco ${Object.keys(mergedCalendar).length} giorni calendario`, '#fff088');
+
+        dataToSave = {
+          exams: mergedExams,
+          projects: mergedProjects,
+          studyPlans: mergedPlans,
+          calendar: mergedCalendar,
+          updatedAt: Date.now(),
+        };
+      } else {
+        log('Nessun dato cloud trovato, carico tutti i dati locali', '#fff088');
+      }
+    }
+
+    log('Scrivo su Firestore...', '#a1bef8');
+    await setDoc(ref, dataToSave);
+    log(`✅ Migrazione completata! ${(dataToSave.exams||[]).length} esami salvati.`, '#5c946e');
+
+    setStatus('migrateStatus', 'ok',
+      `🎉 Fatto! ${(dataToSave.exams||[]).length} esami, ${(dataToSave.projects||[]).length} progetti e ${Object.keys(dataToSave.calendar||{}).length} giorni calendario caricati su Firebase.
+      <br><br>Ora puoi <strong>aprire StudyMap</strong>, fare login con Google e trovare tutti i tuoi dati.`);
+
+    btn.innerHTML = '✅ Migrazione completata';
+    btn.className = 'btn btn-success';
+  } catch(e) {
+    log('❌ Errore: ' + e.message, '#ff4d63');
+    setStatus('migrateStatus', 'error', '❌ Errore: ' + e.message);
+    btn.innerHTML = '☁️ Riprova';
+    btn.disabled = false; btnM.disabled = false;
+  }
+}
+</script>
+</body>
+</html>
