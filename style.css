@@ -1406,3 +1406,110 @@ input:focus, select:focus, textarea:focus {
   font-size: 13px;
 }
 .sr-preview-sample { color: var(--ink-light); }
+
+/* ======= EXAM NOTES ======= */
+.exam-notes-block {
+  background: #fff8e1;
+  border: 1px solid #ffe082;
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  margin-bottom: 14px;
+}
+.exam-notes-label { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: #7a5c00; margin-bottom: 4px; text-transform: uppercase; }
+.exam-notes-text { font-size: 13px; color: var(--ink-mid); line-height: 1.55; }
+textarea { resize: vertical; min-height: 80px; }
+
+/* ======= PLAN MODAL — two-column layout ======= */
+.modal-xl { width: 900px; max-width: 98vw; }
+.plan-modal-body { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.plan-modal-left { display: flex; flex-direction: column; gap: 0; }
+.plan-modal-right { display: flex; flex-direction: column; gap: 8px; border-left: 1px solid var(--border); padding-left: 20px; }
+
+/* ======= STUDY MODE PICKER ======= */
+.study-mode-group { display: flex; gap: 10px; margin-bottom: 4px; }
+.study-mode-option { flex: 1; cursor: pointer; }
+.study-mode-option input[type=radio] { display: none; }
+.study-mode-card {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  border: 2px solid var(--border); background: var(--cream);
+  transition: border-color .15s, background .15s;
+  cursor: pointer;
+}
+.study-mode-card strong { font-size: 13px; color: var(--ink); }
+.study-mode-card small { font-size: 11px; color: var(--ink-light); line-height: 1.4; }
+.study-mode-option input:checked + .study-mode-card {
+  border-color: var(--racing-red); background: var(--red-pale);
+}
+
+/* ======= SEQUENTIAL ORDER ======= */
+.seq-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; background: var(--cream);
+  border-radius: var(--radius-sm); margin-bottom: 6px;
+  cursor: grab; border: 1px solid var(--border);
+}
+.seq-item:active { cursor: grabbing; }
+.seq-handle { color: var(--ink-light); font-size: 16px; flex-shrink: 0; cursor: grab; }
+.seq-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.seq-label { flex: 1; font-size: 13px; font-weight: 500; }
+.seq-weight-group { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.seq-weight-group input { width: 52px; text-align: center; padding: 4px 6px; font-size: 13px; }
+.seq-weight-group span { font-size: 13px; color: var(--ink-light); }
+
+/* ======= PLAN MINI CALENDAR (drag) ======= */
+.plan-cal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.plan-quick-chips { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+.plan-chip {
+  padding: 4px 12px; border-radius: 20px; border: 1.5px solid var(--border);
+  background: #fff; font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: all .15s; font-family: inherit;
+}
+.plan-chip:hover { border-color: var(--racing-red); color: var(--racing-red); }
+
+.plan-mini-cal { user-select: none; }
+.plan-mini-cal-weekdays { display: grid; grid-template-columns: repeat(7,1fr); background: var(--cream); border-radius: 6px 6px 0 0; border: 1px solid var(--border); border-bottom: none; }
+.pmcw { text-align: center; padding: 6px 2px; font-size: 10px; font-weight: 700; color: var(--ink-light); }
+.plan-mini-cal-days { display: grid; grid-template-columns: repeat(7,1fr); border: 1px solid var(--border); border-radius: 0 0 6px 6px; overflow: hidden; }
+.pmc-day {
+  aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-family: 'DM Mono', monospace; cursor: pointer;
+  border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  transition: background .1s; position: relative;
+  background: #fff;
+}
+.pmc-day:hover:not(.other-month) { background: var(--red-pale); }
+.pmc-day.other-month { background: var(--cream); color: var(--ink-light); opacity: .4; cursor: default; }
+.pmc-day.today span { color: var(--racing-red); font-weight: 700; }
+.pmc-day.weekend span { color: var(--ink-light); }
+.pmc-day.selected { background: var(--racing-red) !important; color: #fff; }
+.pmc-day.selected span { color: #fff; font-weight: 700; }
+.pmc-day.selected.weekend { background: var(--red-deep) !important; }
+
+/* ======= PLAN PREVIEW ======= */
+.plan-preview {
+  background: var(--cream); border-radius: var(--radius-sm);
+  border: 1px solid var(--border); padding: 12px 14px;
+  flex: 1; min-height: 120px;
+}
+.plan-preview-empty { color: var(--ink-light); font-size: 13px; text-align: center; padding-top: 20px; }
+.preview-header { font-size: 13px; font-weight: 700; margin-bottom: 10px; color: var(--ink); }
+.preview-rows { display: flex; flex-direction: column; gap: 8px; }
+.preview-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; padding: 8px 10px;
+  background: #fff; border-radius: 6px; border: 1px solid var(--border);
+}
+.preview-row.warn { background: #fff8e1; border-color: #ffe082; }
+.pr-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.pr-name { flex: 1; color: var(--ink-mid); }
+.pr-pages { font-family: 'DM Mono', monospace; font-size: 12px; white-space: nowrap; }
+.pr-pages strong { color: var(--racing-red); font-size: 13px; }
+
+/* ======= COPY-FROM GROUP ======= */
+#copyFromGroup .btn-ghost { margin-top: 6px; font-size: 12px; }
+
+@media (max-width: 760px) {
+  .plan-modal-body { grid-template-columns: 1fr; }
+  .plan-modal-right { border-left: none; border-top: 1px solid var(--border); padding-left: 0; padding-top: 16px; }
+}
