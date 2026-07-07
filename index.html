@@ -33,9 +33,8 @@
   <nav class="sidebar-nav">
     <button class="nav-btn active" data-view="dashboard"><span class="nav-icon">🏠</span><span class="nav-label">Dashboard</span></button>
     <button class="nav-btn" data-view="esami"><span class="nav-icon">🎓</span><span class="nav-label">Esami</span></button>
-    <button class="nav-btn" data-view="piani"><span class="nav-icon">📋</span><span class="nav-label">Piani di Studio</span></button>
+    <button class="nav-btn" data-view="piani"><span class="nav-icon">�</span><span class="nav-label">Pianifica</span></button>
     <button class="nav-btn" data-view="calendario"><span class="nav-icon">📅</span><span class="nav-label">Calendario</span></button>
-    <button class="nav-btn" data-view="tesi"><span class="nav-icon">📝</span><span class="nav-label">Tesi & Progetti</span></button>
   </nav>
   <div class="sidebar-exams" id="sidebarExams">
     <p class="sidebar-section-label">I TUOI ESAMI</p>
@@ -74,24 +73,46 @@
     <div id="examsGrid" class="exams-grid"></div>
   </section>
 
-  <!-- PIANI DI STUDIO -->
+  <!-- PIANIFICA -->
   <section class="view" id="view-piani">
     <header class="page-header">
-      <div><h1>📋 Piani di Studio</h1><p class="subtitle">Un piano per materia, con selezione giorni via trascinamento sul calendario</p></div>
-      <button class="btn-primary" id="btnAddPlan">+ Nuovo piano</button>
+      <div><h1>📐 Pianifica</h1><p class="subtitle">Simula scenari e crea blocchi di studio con attività quotidiane</p></div>
+      <button class="btn-primary" id="btnAddBlock" onclick="openBlockModal(null)">+ Nuovo blocco</button>
     </header>
-    <div class="plans-explainer">
-      <span>💡</span>
-      <div><strong>Come funziona:</strong> crea un piano per ogni materia, seleziona i giorni trascinando sul calendario integrato qui sotto, scegli se studiare i libri in parallelo o in successione. Prima di salvare vedi quante pagine/slide al giorno ti tocca — così puoi aggiustare il piano.</div>
+
+    <!-- Scenario simulator -->
+    <div class="sim-section">
+      <div class="sim-section-header">
+        <h3>🎯 Simulatore scenari</h3>
+        <p class="sim-section-sub">Scegli un esame e scopri quante pagine dovresti fare al giorno in diversi scenari</p>
+      </div>
+      <div class="sim-controls">
+        <select id="simExam"><option value="">— Seleziona esame —</option></select>
+      </div>
+      <div class="sim-scenario-rows" id="simScenarioRows"></div>
+      <div class="sim-add-btns">
+        <button class="btn-ghost" onclick="addSimRow('days')">+ X giorni</button>
+        <button class="btn-ghost" onclick="addSimRow('date')">+ Fino a data</button>
+      </div>
+      <div id="simResultsArea"></div>
     </div>
-    <div id="plansGrid" class="plans-grid"></div>
+
+    <!-- Study blocks -->
+    <div class="blocks-section">
+      <div class="blocks-section-header">
+        <h3 class="blocks-title">📋 Blocchi di Studio</h3>
+        <button class="btn-ghost" onclick="openBlockModal(null)">+ Nuovo blocco</button>
+      </div>
+      <p class="blocks-hint">Ogni blocco ha un intervallo di date e un elenco di attività da fare ogni giorno. Spunta le attività direttamente dal Calendario!</p>
+      <div id="blocksGrid" class="blocks-grid"></div>
+    </div>
   </section>
 
   <!-- CALENDARIO -->
   <section class="view" id="view-calendario">
     <header class="page-header">
-      <div><h1>📅 Calendario Studio</h1><p class="subtitle">I giorni colorati sono coperti dai tuoi Piani. Clicca un giorno per dettagli o modifiche.</p></div>
-      <button class="btn-ghost" onclick="document.querySelector('[data-view=piani]').click()" style="font-size:13px">📋 Gestisci piani</button>
+      <div><h1>📅 Calendario Studio</h1><p class="subtitle">I giorni colorati hanno blocchi di studio attivi. Clicca un giorno per vedere le attività e spuntarle.</p></div>
+      <button class="btn-ghost" onclick="document.querySelector('[data-view=piani]').click()" style="font-size:13px">📐 Pianifica</button>
     </header>
     <div class="calendar-layout">
       <div class="calendar-left">
@@ -110,14 +131,6 @@
     </div>
   </section>
 
-  <!-- TESI & PROGETTI -->
-  <section class="view" id="view-tesi">
-    <header class="page-header">
-      <div><h1>📝 Tesi & Progetti</h1><p class="subtitle">Traccia capitoli da leggere, scrivere e pianificare</p></div>
-      <button class="btn-primary" id="btnAddProject">+ Nuovo progetto</button>
-    </header>
-    <div id="projectsGrid" class="projects-grid"></div>
-  </section>
 
 </main>
 
@@ -184,85 +197,54 @@
   </div>
 </div>
 
-<!-- Modal: Piano di Studio (NUOVO — drag calendar + parallel/sequential) -->
-<div class="modal-overlay" id="planModal">
-  <div class="modal modal-xl">
+<!-- Modal: Blocco di Studio -->
+<div class="modal-overlay" id="blockModal">
+  <div class="modal modal-wide">
     <div class="modal-header">
-      <h2 id="planModalTitle">Nuovo Piano di Studio</h2>
-      <button class="modal-close" data-close="planModal">✕</button>
+      <h2 id="blockModalTitle">Nuovo Blocco di Studio</h2>
+      <button class="modal-close" data-close="blockModal">✕</button>
     </div>
-    <div class="modal-body plan-modal-body">
-
-      <!-- LEFT: config -->
-      <div class="plan-modal-left">
-        <div class="form-group">
-          <label>Nome piano</label>
-          <input type="text" id="planLabel" placeholder="es. Luglio — Clinica">
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group" style="flex:2"><label>Nome blocco</label><input type="text" id="blockLabel" placeholder="es. Luglio — Clinica cap 1-3"></div>
+        <div class="form-group" style="flex:1"><label>Esame collegato (opzionale)</label><select id="blockExam"><option value="">— nessuno —</option></select></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Data inizio</label><input type="date" id="blockStart" oninput="updateBlockDaysPreview()" onchange="updateBlockDaysPreview()"></div>
+        <div class="form-group"><label>Data fine</label><input type="date" id="blockEnd" oninput="updateBlockDaysPreview()" onchange="updateBlockDaysPreview()"></div>
+      </div>
+      <div class="form-group">
+        <label>📆 Giorni della settimana in cui prevedi di studiare</label>
+        <div class="weekday-picker" id="blockWeekdayPicker">
+          <button type="button" class="wd-chip" data-dow="1">Lun</button>
+          <button type="button" class="wd-chip" data-dow="2">Mar</button>
+          <button type="button" class="wd-chip" data-dow="3">Mer</button>
+          <button type="button" class="wd-chip" data-dow="4">Gio</button>
+          <button type="button" class="wd-chip" data-dow="5">Ven</button>
+          <button type="button" class="wd-chip" data-dow="6">Sab</button>
+          <button type="button" class="wd-chip" data-dow="0">Dom</button>
         </div>
-
-        <!-- Copy days from another plan -->
-        <div class="form-group" id="copyFromGroup" style="display:none">
-          <label>📋 Copia giorni da un altro piano</label>
-          <select id="copyFromPlan"><option value="">— seleziona —</option></select>
-          <button class="btn-ghost" id="btnCopyDays" style="margin-top:6px;font-size:13px">Copia giorni selezionati</button>
-        </div>
-
-        <div class="form-section-title" style="margin-top:16px">📚 Materie e materiali</div>
-        <p style="font-size:12px;color:var(--ink-light);margin-bottom:10px">Spunta i materiali di questo piano.</p>
-        <div id="planItemPicker" class="plan-item-picker"></div>
-
-        <div class="form-section-title" style="margin-top:16px">📖 Modalità studio libri</div>
-        <div class="study-mode-group">
-          <label class="study-mode-option">
-            <input type="radio" name="studyMode" value="parallel" id="modeParallel" checked>
-            <span class="study-mode-card">
-              <strong>In parallelo</strong>
-              <small>Ogni giorno studi un po' di tutti i libri selezionati</small>
-            </span>
-          </label>
-          <label class="study-mode-option">
-            <input type="radio" name="studyMode" value="sequential" id="modeSequential">
-            <span class="study-mode-card">
-              <strong>In successione</strong>
-              <small>Finisci un libro prima di passare al prossimo</small>
-            </span>
-          </label>
-        </div>
-
-        <!-- Sequential order & weight -->
-        <div id="sequentialConfig" class="hidden">
-          <p style="font-size:12px;color:var(--ink-light);margin:10px 0 8px">Trascina per ordinare. Assegna il % di giorni a ogni libro (totale 100%).</p>
-          <div id="sequentialOrder"></div>
+        <div class="wd-presets">
+          <button type="button" class="btn-ghost" id="wdPresetAll" style="font-size:11px;padding:3px 9px">Tutti i giorni</button>
+          <button type="button" class="btn-ghost" id="wdPresetWeekdays" style="font-size:11px;padding:3px 9px">Solo feriali (Lun-Ven)</button>
         </div>
       </div>
+      <div id="blockDaysPreview" class="block-days-preview"></div>
 
-      <!-- RIGHT: drag calendar + preview -->
-      <div class="plan-modal-right">
-        <div class="plan-cal-header">
-          <button class="cal-arrow" id="planCalPrev">‹</button>
-          <span id="planCalMonthLabel" class="cal-month" style="font-size:16px"></span>
-          <button class="cal-arrow" id="planCalNext">›</button>
-        </div>
-        <p style="font-size:12px;color:var(--ink-light);margin-bottom:8px;text-align:center">
-          🖱️ Trascina per selezionare giorni · Ctrl+click per deselezionare singolarmente
-        </p>
-        <!-- Weekend exclude chips -->
-        <div class="plan-quick-chips">
-          <button class="plan-chip" id="chipNoWeekend">❌ Escludi weekend</button>
-          <button class="plan-chip" id="chipClearAll">🗑️ Svuota</button>
-        </div>
-        <div class="plan-mini-cal" id="planMiniCal"></div>
-
-        <!-- Live preview -->
-        <div class="plan-preview" id="planPreview">
-          <p class="plan-preview-empty">Seleziona dei giorni e dei materiali per vedere il piano giornaliero</p>
-        </div>
+      <div id="blockMaterialsSection" class="hidden">
+        <div class="form-section-title">📊 Calcolo automatico pagine/attività</div>
+        <p style="font-size:12px;color:var(--ink-light);margin-bottom:10px">Seleziona i materiali dell'esame collegato: calcolo io quante pagine/slides/minuti ti servono al giorno, in base ai giorni scelti sopra. Ogni giorno, dal Calendario, potrai segnare quanto hai fatto davvero.</p>
+        <div id="blockMaterialsList" class="block-materials-list"></div>
       </div>
 
+      <div class="form-section-title">✅ Altre attività da fare ogni giorno</div>
+      <p style="font-size:12px;color:var(--ink-light);margin-bottom:10px">Scrivi liberamente: "ripetere ad alta voce cap 2", "2 capovolte" 😄 (per le pagine usa il calcolo automatico qui sopra)</p>
+      <div id="blockTasksList" class="block-tasks-list"></div>
+      <button class="btn-ghost" id="addBlockTaskBtn">+ Aggiungi attività</button>
     </div>
     <div class="modal-footer">
-      <button class="btn-ghost" data-close="planModal">Annulla</button>
-      <button class="btn-primary" id="savePlanBtn">💾 Salva piano</button>
+      <button class="btn-ghost" data-close="blockModal">Annulla</button>
+      <button class="btn-primary" id="saveBlockBtn">💾 Salva blocco</button>
     </div>
   </div>
 </div>
@@ -278,53 +260,6 @@
     <div class="modal-footer">
       <button class="btn-ghost" data-close="progressModal">Annulla</button>
       <button class="btn-primary" id="saveProgressBtn">Salva</button>
-    </div>
-  </div>
-</div>
-
-<!-- Modal: Progetto -->
-<div class="modal-overlay" id="projectModal">
-  <div class="modal">
-    <div class="modal-header">
-      <h2 id="projectModalTitle">Nuovo Progetto</h2>
-      <button class="modal-close" data-close="projectModal">✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="form-group"><label>Nome progetto</label><input type="text" id="projectName" placeholder="es. Tesi magistrale"></div>
-      <div class="form-row">
-        <div class="form-group"><label>Tipo</label><select id="projectType"><option value="tesi">Tesi</option><option value="elaborato">Elaborato</option><option value="ricerca">Ricerca</option><option value="altro">Altro</option></select></div>
-        <div class="form-group">
-          <label>Colore</label>
-          <div class="color-picker-wrap">
-            <div class="color-picker" id="projectColorPicker"></div>
-            <div class="custom-color-row">
-              <input type="color" id="projectCustomColor" value="#3548c0" class="input-color-native">
-              <button class="btn-ghost" style="font-size:12px;padding:4px 10px" id="applyProjectCustomColor">Usa</button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="form-section-title">📖 Da leggere</div>
-      <div class="form-row">
-        <div class="form-group"><label>Cap. totali</label><input type="number" id="readChapTotal" placeholder="0"></div>
-        <div class="form-group"><label>Cap. letti</label><input type="number" id="readChapDone" placeholder="0"></div>
-        <div class="form-group"><label>Pag. totali</label><input type="number" id="readPagesTotal" placeholder="0"></div>
-        <div class="form-group"><label>Pag. lette</label><input type="number" id="readPagesDone" placeholder="0"></div>
-      </div>
-      <div class="form-section-title">✍️ Da scrivere</div>
-      <div class="form-row">
-        <div class="form-group"><label>Cap. totali</label><input type="number" id="writeChapTotal" placeholder="0"></div>
-        <div class="form-group"><label>Cap. scritti</label><input type="number" id="writeChapDone" placeholder="0"></div>
-        <div class="form-group"><label>Pag. totali</label><input type="number" id="writePagesTotal" placeholder="0"></div>
-        <div class="form-group"><label>Pag. scritte</label><input type="number" id="writePagesDone" placeholder="0"></div>
-      </div>
-      <div class="form-section-title">🗂️ Da pianificare</div>
-      <div id="projectTasks" class="project-tasks-list"></div>
-      <button class="btn-ghost" id="addProjectTaskBtn">+ Aggiungi task</button>
-    </div>
-    <div class="modal-footer">
-      <button class="btn-ghost" data-close="projectModal">Annulla</button>
-      <button class="btn-primary" id="saveProjectBtn">Salva progetto</button>
     </div>
   </div>
 </div>

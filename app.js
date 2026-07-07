@@ -33,17 +33,14 @@ const PRESET_COLORS = [
 ];
 
 // ===== STATE =====
-// Plan shape: { id, label, days:Set<string>→stored as array,
-//   items:[{examId,bookIdx,type}],
-//   studyMode:'parallel'|'sequential',
-//   sequentialOrder:[{examId,bookIdx,type,weight}]  (weight = % of days)
-// }
+// studyBlock shape: { id, label, color, examId|null, startDate, endDate, activeWeekdays:[0-6], tasks:[{id,text}], autoItems:[{type:'book'|'slides'|'video',bookIdx}] }
 let state = {
-  exams: [], projects: [], studyPlans: [], calendar: {},
+  exams: [], studyBlocks: [], calendar: {},
   calMonth: new Date().getMonth(), calYear: new Date().getFullYear(),
-  selectedDay: null, editingExamId: null, editingProjectId: null, editingPlanId: null,
+  selectedDay: null, editingExamId: null, editingBlockId: null,
   currentUser: null,
 };
+let simRows = window.simRows = []; // ephemeral scenario rows — on window for inline HTML handlers
 let saveDebounceTimer = null;
 
 // ===== FIRESTORE =====
@@ -55,33 +52,12 @@ async function loadFromFirestore(uid) {
     const snap = await getDoc(userDocRef(uid));
     if (snap.exists()) {
       const d = snap.data();
-      state.exams      = d.exams      || [];
-      state.projects   = d.projects   || [];
-      state.studyPlans = (d.studyPlans||[]).map(normalizePlan);
-      state.calendar   = d.calendar   || {};
+      state.exams       = d.exams       || [];
+      state.studyBlocks = d.studyBlocks || [];
+      state.calendar    = d.calendar    || {};
     }
     hideSync();
   } catch(e) { showSync('Errore caricamento','error'); console.error(e); }
-}
-
-// Normalize old plan format (scheduleRules / from+to) → new days[] format
-function normalizePlan(p) {
-  if (p.days && Array.isArray(p.days)) return p; // already new format
-  const days = new Set();
-  const rules = p.scheduleRules || (p.from ? [{from:p.from,to:p.to,excludeWeekends:false,excludeDays:[]}] : []);
-  rules.forEach(r => {
-    if (!r.from||!r.to) return;
-    let cur = new Date(r.from+'T00:00:00');
-    const end = new Date(r.to+'T00:00:00');
-    while (cur<=end) {
-      const dow = cur.getDay();
-      const isWE = dow===0||dow===6;
-      if (!(r.excludeWeekends&&isWE) && !(r.excludeDays||[]).includes(dow))
-        days.add(cur.toISOString().slice(0,10));
-      cur.setDate(cur.getDate()+1);
-    }
-  });
-  return { ...p, days:[...days].sort(), studyMode: p.studyMode||'parallel', sequentialOrder: p.sequentialOrder||[] };
 }
 
 function saveToFirestore() {
@@ -91,8 +67,8 @@ function saveToFirestore() {
     showSync('Salvataggio...','loading');
     try {
       await setDoc(userDocRef(state.currentUser.uid), {
-        exams: state.exams, projects: state.projects,
-        studyPlans: state.studyPlans.map(p => ({...p, days: p.days||[]})),
+        exams: state.exams,
+        studyBlocks: state.studyBlocks,
         calendar: state.calendar, updatedAt: Date.now(),
       });
       showSync('Salvato ✓','success'); setTimeout(hideSync,1800);
@@ -123,7 +99,7 @@ onAuthStateChanged(auth, async user=>{
     await loadFromFirestore(user.uid);
     renderAll();
   } else {
-    state.currentUser=null; state.exams=[];state.projects=[];state.studyPlans=[];state.calendar={};
+    state.currentUser=null; state.exams=[];state.studyBlocks=[];state.calendar={};
     document.getElementById('loginScreen').classList.remove('hidden');
     document.getElementById('sidebar').style.display='none';
     document.getElementById('main').style.display='none';
@@ -137,139 +113,199 @@ function fmtShort(d){ if(!d)return''; return new Date(d+'T00:00:00').toLocaleDat
 function today(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function daysUntil(ds){ if(!ds)return null; return Math.ceil((new Date(ds+'T00:00:00')-new Date(today()+'T00:00:00'))/86400000); }
 
-// ===== MATERIAL HELPERS =====
-function itemKey(examId,bookIdx,type){ return `${examId}::${bookIdx}::${type}`; }
-function examItems(exam) {
-  const items=[];
-  (exam.books||[]).forEach((b,i)=>items.push({examId:exam.id,bookIdx:i,type:'book',label:b.title||`Libro ${i+1}`,color:exam.color}));
-  if(exam.hasSlides) items.push({examId:exam.id,bookIdx:-1,type:'slides',label:'Slides',color:exam.color});
-  if(exam.hasVideo)  items.push({examId:exam.id,bookIdx:-2,type:'video', label:'Videolezioni',color:exam.color});
-  if(!items.length)  items.push({examId:exam.id,bookIdx:-3,type:'exam',  label:'(nessun materiale)',color:exam.color});
-  return items;
+// ===== BLOCK HELPERS =====
+// Weekdays a block is active on. Falls back to legacy excludeWeekends flag for old blocks.
+function blockActiveWeekdays(block) {
+  if (block.activeWeekdays && block.activeWeekdays.length) return block.activeWeekdays;
+  if (block.excludeWeekends) return [1,2,3,4,5];
+  return [0,1,2,3,4,5,6];
 }
-function allStudyItems(){ return state.exams.flatMap(e=>examItems(e)); }
-
-// ===== PLAN HELPERS =====
-function planDaysSet(plan){ return new Set(plan.days||[]); }
-
-// Active items for a date
-function activeItemsForDate(dateStr) {
-  const dayData = state.calendar[dateStr]||{};
-  if (dayData.overrideItems!==undefined&&dayData.overrideItems!==null) return dayData.overrideItems;
-  const plan = coveringPlanForDate(dateStr);
-  if (plan) return plan.items||[];
-  if (dayData.isStudyDay) return allStudyItems().map(i=>({examId:i.examId,bookIdx:i.bookIdx,type:i.type}));
-  return [];
-}
-
-function coveringPlanForDate(dateStr) {
-  return [...state.studyPlans].reverse().find(p=>(p.days||[]).includes(dateStr))||null;
-}
-
-function isDayActive(dateStr) {
-  if ((state.calendar[dateStr]||{}).isStudyDay) return true;
-  return state.studyPlans.some(p=>(p.days||[]).includes(dateStr));
-}
-
-// ===== COMPUTE DAILY TASKS (respects sequential mode) =====
-function computeDailyTasks(dateStr) {
-  const plan = coveringPlanForDate(dateStr)||null;
-  const activeItems = activeItemsForDate(dateStr);
-  const tasks = [];
-
-  if (!activeItems.length) return tasks;
-
-  const bookItems = activeItems.filter(i=>i.type==='book');
-  const nonBookItems = activeItems.filter(i=>i.type!=='book'&&i.type!=='exam');
-  const mode = plan?.studyMode||'parallel';
-
-  // --- SEQUENTIAL mode: only show the CURRENT book ---
-  if (mode==='sequential'&&bookItems.length>1) {
-    const order = plan.sequentialOrder||[];
-    // Sort book items by sequential order
-    const sorted = [...bookItems].sort((a,b)=>{
-      const ia = order.findIndex(o=>o.examId===a.examId&&o.bookIdx===a.bookIdx);
-      const ib = order.findIndex(o=>o.examId===b.examId&&o.bookIdx===b.bookIdx);
-      return (ia<0?999:ia)-(ib<0?999:ib);
-    });
-    // Find the first book not yet finished
-    for (const item of sorted) {
-      const task = makeBookTask(item, dateStr, plan);
-      if (task) { tasks.push(task); break; } // only one active book at a time
-    }
-  } else {
-    // PARALLEL: all books active
-    bookItems.forEach(item=>{
-      const task = makeBookTask(item, dateStr, plan);
-      if (task) tasks.push(task);
-    });
+function blockDays(block) {
+  const days = [];
+  if (!block.startDate || !block.endDate) return days;
+  const activeDows = blockActiveWeekdays(block);
+  let cur = new Date(block.startDate + 'T00:00:00');
+  const end = new Date(block.endDate + 'T00:00:00');
+  while (cur <= end) {
+    if (activeDows.includes(cur.getDay())) days.push(cur.toISOString().slice(0,10));
+    cur.setDate(cur.getDate() + 1);
   }
-
-  // Slides and video are always in parallel
-  nonBookItems.forEach(item=>{
-    const exam = state.exams.find(e=>e.id===item.examId);
-    if (!exam) return;
-    let totalAmount=0, label='', alreadyDone=0;
-    if (item.type==='slides') {
-      if (!exam.slidesTotal) return;
-      totalAmount=exam.slidesTotal; label='Slides'; alreadyDone=exam.slidesDone||0;
-    } else if (item.type==='video') {
-      if (!exam.videoTotal) return;
-      totalAmount=exam.videoTotal; label='Videolezioni (min)'; alreadyDone=exam.videoDone||0;
-    }
-    const remaining=Math.max(0,totalAmount-alreadyDone);
-    if (!remaining) return;
-    const daysLeft=Math.max(1,getActiveDaysForItem(item,dateStr,null,plan).length);
-    tasks.push({examId:item.examId,bookIdx:item.bookIdx,type:item.type,label,target:Math.ceil(remaining/daysLeft)});
-  });
-
-  return tasks;
+  return days;
 }
-
-function makeBookTask(item, dateStr, plan) {
-  const exam = state.exams.find(e=>e.id===item.examId);
+function blocksForDate(dateStr) {
+  return state.studyBlocks.filter(b => {
+    if (dateStr < b.startDate || dateStr > b.endDate) return false;
+    const dow = new Date(dateStr + 'T00:00:00').getDay();
+    return blockActiveWeekdays(b).includes(dow);
+  });
+}
+// Pace of a single tracked material of a block, computed live for a given date
+// (remaining ÷ study-days left in the block from that date onward)
+function autoPaceOnDate(block, item, dateStr, exam) {
+  exam = exam || state.exams.find(e => e.id === block.examId);
   if (!exam) return null;
-  const book = (exam.books||[])[item.bookIdx];
-  if (!book||!book.totalPages) return null;
-
-  let alreadyDone=0;
-  Object.entries(state.calendar).forEach(([d,day])=>{
-    if (d<dateStr)(day.logs||[]).forEach(l=>{
-      if(l.examId===item.examId&&l.bookIdx===item.bookIdx&&l.type==='book') alreadyDone+=(l.pages||0);
+  const allDays = blockDays(block);
+  const idx = allDays.indexOf(dateStr);
+  if (idx === -1) return null;
+  const daysLeft = allDays.length - idx;
+  let total, done, label, unit, icon;
+  if (item.type === 'book') {
+    const b = (exam.books || [])[item.bookIdx]; if (!b) return null;
+    total = b.totalPages || 0; done = b.pagesRead || 0; label = b.title || `Libro ${item.bookIdx+1}`; unit = 'pp'; icon = '📖';
+  } else if (item.type === 'slides') {
+    total = exam.slidesTotal || 0; done = exam.slidesDone || 0; label = 'Slides'; unit = 'slides'; icon = '🖥️';
+  } else if (item.type === 'video') {
+    total = exam.videoTotal || 0; done = exam.videoDone || 0; label = 'Video'; unit = 'min'; icon = '🎬';
+  } else return null;
+  const remaining = Math.max(0, total - done);
+  if (remaining <= 0) return { done:true, label, icon, unit, total, doneSoFar:done };
+  const perDay = Math.ceil(remaining / daysLeft);
+  return { done:false, perDay, remaining, daysLeft, label, unit, icon, total, doneSoFar:done };
+}
+function autoItemKey(block, item) { return `${block.id}|${item.type}|${item.bookIdx ?? 'x'}`; }
+// Log the actual amount done for a tracked material on a given date; updates the exam's
+// real counters incrementally (delta-based) so switching the number up/down stays consistent.
+window.applyAutoLog = function(dateStr, blockId, type, bookIdxRaw, newAmountRaw) {
+  const block = state.studyBlocks.find(b => b.id === blockId); if (!block) return;
+  const exam = state.exams.find(e => e.id === block.examId); if (!exam) return;
+  const bookIdx = (bookIdxRaw === '' || bookIdxRaw == null) ? null : +bookIdxRaw;
+  const newAmount = Math.max(0, Math.round(+newAmountRaw || 0));
+  const key = `${block.id}|${type}|${bookIdx ?? 'x'}`;
+  if (!state.calendar[dateStr]) state.calendar[dateStr] = {};
+  if (!state.calendar[dateStr].autoLog) state.calendar[dateStr].autoLog = {};
+  const prevApplied = state.calendar[dateStr].autoLog[key] || 0;
+  const delta = newAmount - prevApplied;
+  if (type === 'book') {
+    const b = exam.books[bookIdx]; if (!b) return;
+    b.pagesRead = Math.min(b.totalPages || 0, Math.max(0, (b.pagesRead||0) + delta));
+  } else if (type === 'slides') {
+    exam.slidesDone = Math.min(exam.slidesTotal || 0, Math.max(0, (exam.slidesDone||0) + delta));
+  } else if (type === 'video') {
+    exam.videoDone = Math.min(exam.videoTotal || 0, Math.max(0, (exam.videoDone||0) + delta));
+  }
+  state.calendar[dateStr].autoLog[key] = newAmount;
+  save();
+  renderDashboard();
+  if (document.getElementById('view-calendario')?.classList.contains('active')) {
+    renderCalendar();
+    if (state.selectedDay) renderDayPanel(state.selectedDay);
+  }
+  if (document.getElementById('view-esami')?.classList.contains('active')) renderExamsGrid();
+};
+// Renders a single tracked-material row (icon, label, live target, editable input) for a given date
+function renderAutoItemRow(block, item, dateStr, dayData) {
+  const exam = state.exams.find(e => e.id === block.examId);
+  const pace = autoPaceOnDate(block, item, dateStr, exam);
+  if (!pace) return '';
+  const key = autoItemKey(block, item);
+  const logged = dayData.autoLog?.[key];
+  if (pace.done) {
+    return `<div class="day-auto-row done"><span class="day-auto-icon">${pace.icon}</span><span class="day-auto-label">${pace.label}</span><span class="day-auto-donebadge">✓ finito</span></div>`;
+  }
+  const val = (logged != null) ? logged : '';
+  return `<div class="day-auto-row${logged!=null?' logged':''}">
+    <span class="day-auto-icon">${pace.icon}</span>
+    <span class="day-auto-label">${pace.label}</span>
+    <span class="day-auto-target">oggi <strong>${pace.perDay}</strong> ${pace.unit}</span>
+    <input type="number" min="0" class="day-auto-input" placeholder="${pace.perDay}" title="Quante/i ${pace.unit} hai fatto davvero oggi? (puoi segnare di più o di meno)"
+      data-blockid="${block.id}" data-type="${item.type}" data-bookidx="${item.bookIdx ?? ''}" value="${val}">
+  </div>`;
+}
+// Manual tasks (checkbox) + auto-calculated items (numeric log) for a block on a given date
+function renderBlockDayContent(block, dateStr, dayData) {
+  const tasks = block.tasks || [];
+  const autoItems = block.autoItems || [];
+  let html = '';
+  if (tasks.length) {
+    html += `<div class="day-task-list">${tasks.map(t=>{
+      const done = !!(dayData.completions?.[t.id]);
+      return `<label class="day-task-row${done?' done':''}">
+        <input type="checkbox" class="day-task-cb" data-blockid="${block.id}" data-taskid="${t.id}"${done?' checked':''}>
+        <span>${t.text}</span>
+      </label>`;
+    }).join('')}</div>`;
+  }
+  if (autoItems.length) {
+    html += `<div class="day-auto-list">${autoItems.map(it=>renderAutoItemRow(block,it,dateStr,dayData)).join('')}</div>`;
+  }
+  if (!tasks.length && !autoItems.length) {
+    html += '<p style="font-size:12px;color:var(--ink-light);margin:4px 0">Nessuna attività in questo blocco</p>';
+  }
+  return html;
+}
+// Attach checkbox + numeric-input listeners after inserting block-day HTML (used by both Dashboard and Calendar)
+function attachBlockDayListeners(container, dateStr) {
+  container.querySelectorAll('.day-task-cb').forEach(cb=>{
+    cb.addEventListener('change',()=>{
+      if(!state.calendar[dateStr])state.calendar[dateStr]={};
+      if(!state.calendar[dateStr].completions)state.calendar[dateStr].completions={};
+      state.calendar[dateStr].completions[cb.dataset.taskid]=cb.checked;
+      cb.closest('label').classList.toggle('done',cb.checked);
+      save();renderCalendar();renderDashboard();
     });
   });
-
-  const remaining=Math.max(0,book.totalPages-alreadyDone);
-  if (!remaining) return null;
-
-  const deadline=(exam.appells||[]).find(a=>a.chosen)?.date||null;
-  const activeDays=getActiveDaysForItem(item,dateStr,deadline,plan);
-  const daysLeft=Math.max(1,activeDays.length);
-  return { examId:item.examId, bookIdx:item.bookIdx, type:'book',
-    label:book.title||`Libro ${item.bookIdx+1}`, target:Math.ceil(remaining/daysLeft), remaining, daysLeft };
-}
-
-function getActiveDaysForItem(item, fromDate, deadline, plan) {
-  const days=new Set();
-  const plans = plan ? [plan] : state.studyPlans.filter(p=>(p.items||[]).some(i=>i.examId===item.examId&&i.bookIdx===item.bookIdx&&i.type===item.type));
-  plans.forEach(p=>{
-    (p.days||[]).forEach(ds=>{
-      if (ds>=fromDate&&(!deadline||ds<=deadline)) days.add(ds);
+  container.querySelectorAll('.day-auto-input').forEach(inp=>{
+    inp.addEventListener('change',()=>{
+      if(inp.value==='')return;
+      applyAutoLog(dateStr, inp.dataset.blockid, inp.dataset.type, inp.dataset.bookidx, inp.value);
     });
   });
-  Object.entries(state.calendar).forEach(([ds,dayData])=>{
-    if (ds<fromDate||(deadline&&ds>deadline)) return;
-    if ((dayData.overrideItems||[]).some(i=>i.examId===item.examId&&i.bookIdx===item.bookIdx&&i.type===item.type))
-      days.add(ds);
+}
+// Reference date used to show a block's "at a glance" pace on its card (today if within range, else next/last study day)
+function blockReferenceDate(block) {
+  const days = blockDays(block); if (!days.length) return null;
+  const t = today();
+  if (days.includes(t)) return t;
+  return days.find(d => d > t) || days[days.length-1];
+}
+// Build a map { dateStr: [block,...] } for the visible month range
+function buildDateBlockMap(fromDate, toDate) {
+  const map = {};
+  state.studyBlocks.forEach(block => {
+    blockDays(block).forEach(d => {
+      if (d >= fromDate && d <= toDate) {
+        if (!map[d]) map[d] = [];
+        map[d].push(block);
+      }
+    });
   });
-  return [...days].sort();
+  return map;
 }
 
-function getStudyDays() {
-  const days=new Set();
-  Object.entries(state.calendar).forEach(([ds,d])=>{ if(d.isStudyDay) days.add(ds); });
-  state.studyPlans.forEach(p=>(p.days||[]).forEach(ds=>days.add(ds)));
-  return [...days].sort();
+// ===== EXAM DAILY PACE =====
+function examDailyPace(exam) {
+  const chosen = (exam.appells || []).find(a => a.chosen);
+  if (!chosen?.date) return null;
+  const du = daysUntil(chosen.date);
+  if (du === null || du <= 0) return null;
+  const items = [];
+  (exam.books || []).forEach((b, i) => {
+    if (!b.totalPages) return;
+    const rem = Math.max(0, b.totalPages - (b.pagesRead || 0));
+    if (rem > 0) items.push({ label: b.title || `Libro ${i+1}`, remaining: rem, perDay: Math.ceil(rem / du), unit: 'pp' });
+  });
+  if (exam.hasSlides && exam.slidesTotal) {
+    const rem = Math.max(0, exam.slidesTotal - (exam.slidesDone || 0));
+    if (rem > 0) items.push({ label: 'Slides', remaining: rem, perDay: Math.ceil(rem / du), unit: 'slides' });
+  }
+  if (exam.hasVideo && exam.videoTotal) {
+    const rem = Math.max(0, exam.videoTotal - (exam.videoDone || 0));
+    if (rem > 0) items.push({ label: 'Video', remaining: rem, perDay: Math.ceil(rem / du), unit: 'min' });
+  }
+  return { daysLeft: du, date: chosen.date, items };
+}
+
+// Trackable materials of an exam (books with pages, slides, video) — used by block auto-calc
+function examMaterials(exam) {
+  if (!exam) return [];
+  const items = [];
+  (exam.books || []).forEach((b, i) => {
+    if (!b.totalPages) return;
+    items.push({ type:'book', bookIdx:i, label:b.title||`Libro ${i+1}`, icon:'📖', unit:'pp', total:b.totalPages, done:b.pagesRead||0 });
+  });
+  if (exam.hasSlides && exam.slidesTotal) items.push({ type:'slides', bookIdx:null, label:'Slides', icon:'🖥️', unit:'slides', total:exam.slidesTotal, done:exam.slidesDone||0 });
+  if (exam.hasVideo && exam.videoTotal)   items.push({ type:'video',  bookIdx:null, label:'Video',  icon:'🎬', unit:'min',    total:exam.videoTotal,  done:exam.videoDone||0 });
+  return items;
 }
 
 // ===== NAVIGATION =====
@@ -282,9 +318,8 @@ document.querySelectorAll('.nav-btn').forEach(btn=>{
     const v=btn.dataset.view;
     if(v==='dashboard') renderDashboard();
     if(v==='esami')     renderExamsGrid();
-    if(v==='piani')     renderPlansView();
+    if(v==='piani')     renderPlanningView();
     if(v==='calendario'){renderCalendar();}
-    if(v==='tesi')      renderProjects();
   });
 });
 document.getElementById('sidebarToggle').addEventListener('click',()=>document.getElementById('sidebar').classList.toggle('collapsed'));
@@ -295,7 +330,7 @@ document.getElementById('sidebarToggle').addEventListener('click',()=>document.g
   document.getElementById('headerDate').innerHTML=`<strong>${days[d.getDay()]}</strong><br>${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
 })();
 
-function renderAll(){ renderSidebarExams(); renderDashboard(); }
+function renderAll(){ renderSidebarExams(); renderDashboard(); renderPlanningView(); }
 
 // ===== SIDEBAR =====
 function renderSidebarExams(){
@@ -314,18 +349,34 @@ function renderDashboard(){ renderTodayTasks(); renderProgressBars(); renderUpco
 function renderTodayTasks(){
   const el=document.getElementById('todayTasks');
   const t=today(); const dayData=state.calendar[t]||{};
-  if(!isDayActive(t)){el.innerHTML='<p style="color:var(--ink-light);font-size:13px;padding:8px 0;">Nessun piano attivo oggi.</p>';return;}
-  const tasks=computeDailyTasks(t);
-  if(!tasks.length){el.innerHTML='<p style="color:var(--ink-light);font-size:13px;">Nessun materiale programmato oggi.</p>';return;}
-  el.innerHTML=tasks.map(task=>{
-    const exam=state.exams.find(e=>e.id===task.examId);
-    const logged=(dayData.logs||[]).find(l=>l.examId===task.examId&&l.bookIdx===task.bookIdx&&l.type===task.type);
-    return `<div class="today-task">
-      <div class="today-task-color" style="background:${exam.color}"></div>
-      <div class="today-task-info"><div class="today-task-name">${exam.name}</div><div class="today-task-sub">${task.label}</div></div>
-      <div class="today-task-pages">${logged?.pages||0}/${task.target} pp</div>
+  const todayBlocks=blocksForDate(t);
+  const examsWithPace=state.exams.filter(e=>examDailyPace(e));
+  if(!todayBlocks.length&&!examsWithPace.length){
+    el.innerHTML='<p style="color:var(--ink-light);font-size:13px;padding:8px 0;">Nessun blocco attivo oggi e nessun appello impostato.</p>';
+    return;
+  }
+  let html='';
+  // Block tasks + auto-calculated pages/activities for today
+  todayBlocks.forEach(block=>{
+    html+=`<div class="day-block-section" style="border-left:3px solid ${block.color}">
+      <div class="day-block-name">${block.label}</div>
+      ${renderBlockDayContent(block,t,dayData)}
     </div>`;
-  }).join('');
+  });
+  // Exam paces (informational, based on chosen appello date)
+  examsWithPace.forEach(e=>{
+    const pace=examDailyPace(e);
+    html+=`<div class="today-task">
+      <div class="today-task-color" style="background:${e.color}"></div>
+      <div class="today-task-info">
+        <div class="today-task-name">${e.name}</div>
+        <div class="today-task-sub">⚡ Appello ${fmt(pace.date)}: ${pace.items.map(i=>`<strong>${i.perDay} ${i.unit}/g</strong> ${i.label}`).join(' · ')}</div>
+      </div>
+      <div class="today-task-pages">${pace.daysLeft}gg</div>
+    </div>`;
+  });
+  el.innerHTML = html || '<p style="color:var(--ink-light);font-size:13px;">Nessun dato per oggi.</p>';
+  attachBlockDayListeners(el, t);
 }
 
 function renderProgressBars(){
@@ -369,10 +420,17 @@ function examProgress(exam){
 function renderExamsGrid(){
   const el=document.getElementById('examsGrid');
   if(!state.exams.length){el.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><div class="empty-state-icon">🎓</div><p>Nessun esame. Clicca "+ Nuovo esame".</p></div>`;return;}
-  el.innerHTML=state.exams.map(e=>renderExamCard(e)).join('');
+  el.innerHTML=state.exams.map((e,i)=>renderExamCard(e,i,state.exams.length)).join('');
 }
+window.moveExam=function(id,dir){
+  const idx=state.exams.findIndex(e=>e.id===id); if(idx<0)return;
+  const newIdx=idx+dir; if(newIdx<0||newIdx>=state.exams.length)return;
+  const [item]=state.exams.splice(idx,1);
+  state.exams.splice(newIdx,0,item);
+  save(); renderSidebarExams(); renderExamsGrid(); renderDashboard();
+};
 
-function renderExamCard(e){
+function renderExamCard(e,idx,total){
   const chosenAppell=(e.appells||[]).find(a=>a.chosen);
   const du=chosenAppell?daysUntil(chosenAppell.date):null;
 
@@ -392,7 +450,7 @@ function renderExamCard(e){
         <div class="book-track"><span class="book-track-label">🧠 Studiate</span><div class="book-track-bar"><div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${r(b.pagesStudied)}%;background:${e.color}"></div></div></div><span class="text-mono" style="font-size:11px">${b.pagesStudied||0}</span></div>
       </div>
       ${tc?`<div class="chapter-tracks mt-8"><div class="chapter-badge">📚 Letti <span class="chapter-count">${b.chaptersRead||0}/${tc}</span></div><div class="chapter-badge">🃏 Anki <span class="chapter-count">${b.chaptersAnki||0}/${tc}</span></div><div class="chapter-badge">✅ Studiati <span class="chapter-count">${b.chaptersStudied||0}/${tc}</span></div></div>`:''}
-      <button class="btn-ghost mt-8" style="font-size:12px;padding:5px 10px" onclick="openProgressModal('${e.id}',${bi})">Aggiorna progresso</button>
+      <button class="btn-ghost mt-8" style="font-size:12px;padding:5px 10px" onclick="event.stopPropagation();openProgressModal('${e.id}',${bi})">Aggiorna progresso</button>
     </div>`;
   }).join('');
 
@@ -401,18 +459,21 @@ function renderExamCard(e){
     ${e.hasVideo?`<div class="material-chip">🎬 Video <span class="material-pct">${e.videoTotal?Math.round((e.videoDone||0)/e.videoTotal*100):0}%</span></div>`:''}
   </div>`:'';
 
-  return `<div class="exam-card" id="exam-card-${e.id}">
+  return `<div class="exam-card" id="exam-card-${e.id}" onclick="openExamModal('${e.id}')" title="Clicca per modificare l'esame">
     <div class="exam-card-header">
       <div class="exam-card-title-row"><div class="exam-card-stripe" style="background:${e.color}"></div><span class="exam-card-name">${e.name}</span></div>
       <div class="exam-card-actions">
-        ${e.moodle?`<a class="exam-moodle" href="${e.moodle}" target="_blank">Moodle</a>`:''}
-        <button class="btn-icon" onclick="openExamModal('${e.id}')">✏️</button>
-        <button class="btn-icon" onclick="deleteExam('${e.id}')">🗑️</button>
+        <button class="btn-icon" onclick="event.stopPropagation();moveExam('${e.id}',-1)" title="Sposta su"${idx===0?' disabled':''}>▲</button>
+        <button class="btn-icon" onclick="event.stopPropagation();moveExam('${e.id}',1)" title="Sposta giù"${idx===total-1?' disabled':''}>▼</button>
+        ${e.moodle?`<a class="exam-moodle" href="${e.moodle}" target="_blank" onclick="event.stopPropagation()">Moodle</a>`:''}
+        <button class="btn-icon" onclick="event.stopPropagation();openExamModal('${e.id}')">✏️</button>
+        <button class="btn-icon" onclick="event.stopPropagation();deleteExam('${e.id}')">🗑️</button>
       </div>
     </div>
     <div class="exam-card-body">
       ${notesHtml}
       ${chosenAppell?`<div class="exam-appell-chosen">📅 Appello: <strong>${fmt(chosenAppell.date)}</strong>${du!==null?`<span class="days-left">${du>0?du+' gg':du===0?'oggi':'passato'}</span>`:''}</div>`:''}
+      ${(()=>{const pace=examDailyPace(e);if(!pace||!pace.items.length)return'';return`<div class="exam-pace-block"><div class="exam-pace-title">⚡ Ritmo necessario — <strong>${pace.daysLeft} giorni</strong> al ${fmtShort(pace.date)}</div><div class="exam-pace-items">${pace.items.map(i=>`<span class="pace-chip"><strong>${i.perDay} ${i.unit}/g</strong> ${i.label} <small>(${i.remaining} rimaste)</small></span>`).join('')}</div></div>`;})()}
       ${booksHtml?`<div class="books-section-title">📚 LIBRI</div>${booksHtml}`:''}
       ${materialsHtml}
     </div>
@@ -437,7 +498,6 @@ function addCustomSwatch(cid,hex){
   (ex||el.lastElementChild).classList.add('selected'); el.dataset.selected=hex;
 }
 document.getElementById('applyCustomColor').addEventListener('click',()=>addCustomSwatch('colorPicker',document.getElementById('examCustomColor').value));
-document.getElementById('applyProjectCustomColor').addEventListener('click',()=>addCustomSwatch('projectColorPicker',document.getElementById('projectCustomColor').value));
 
 // ===== EXAM MODAL =====
 ['btnAddExam','btnAddExam2'].forEach(id=>document.getElementById(id)?.addEventListener('click',()=>openExamModal(null)));
@@ -578,400 +638,264 @@ window.openProgressModal=function(examId,bookIdx){
   openModal('progressModal');
 };
 
-// ===== PLAN MODAL — drag calendar + preview =====
-let planModalState = { days: new Set(), month: new Date().getMonth(), year: new Date().getFullYear(), dragging: false, dragStart: null, dragMode: 'add' };
-
-document.getElementById('btnAddPlan').addEventListener('click',()=>openPlanModal(null));
-window.openPlanModal=function(planId){
-  state.editingPlanId=planId;
-  const plan=planId?state.studyPlans.find(p=>p.id===planId):null;
-
-  document.getElementById('planModalTitle').textContent=plan?'Modifica Piano':'Nuovo Piano di Studio';
-  document.getElementById('planLabel').value=plan?(plan.label||''):'';
-
-  // Init drag-calendar state
-  planModalState.days = new Set(plan?.days||[]);
-  if (planModalState.days.size) {
-    const sorted=[...planModalState.days].sort();
-    const first=new Date(sorted[0]+'T00:00:00');
-    planModalState.month=first.getMonth(); planModalState.year=first.getFullYear();
-  } else {
-    planModalState.month=new Date().getMonth(); planModalState.year=new Date().getFullYear();
-  }
-
-  // Study mode
-  document.getElementById('modeParallel').checked=(plan?.studyMode||'parallel')==='parallel';
-  document.getElementById('modeSequential').checked=plan?.studyMode==='sequential';
-  document.getElementById('sequentialConfig').classList.toggle('hidden',plan?.studyMode!=='sequential');
-
-  // Copy-from dropdown
-  const copyFrom=document.getElementById('copyFromPlan');
-  const otherPlans=state.studyPlans.filter(p=>p.id!==planId);
-  document.getElementById('copyFromGroup').style.display=otherPlans.length?'':'none';
-  copyFrom.innerHTML='<option value="">— seleziona piano —</option>'+
-    otherPlans.map(p=>`<option value="${p.id}">${p.label||p.id}</option>`).join('');
-
-  document.getElementById('btnCopyDays').onclick=()=>{
-    const src=state.studyPlans.find(p=>p.id===copyFrom.value);
-    if(!src){alert('Seleziona un piano da cui copiare.');return;}
-    (src.days||[]).forEach(d=>planModalState.days.add(d));
-    renderPlanMiniCal(); updatePlanPreview();
-    showSync(`Copiati ${src.days?.length||0} giorni da "${src.label}" ✓`,'success'); setTimeout(hideSync,2000);
-  };
-
-  // Items picker
-  renderPlanItemPicker(plan?(plan.items||[]):[]);
-
-  // Mode toggle → show/hide sequential config + update preview
-  document.querySelectorAll('input[name=studyMode]').forEach(r=>r.addEventListener('change',()=>{
-    document.getElementById('sequentialConfig').classList.toggle('hidden',document.getElementById('modeParallel').checked);
-    renderSequentialOrder(); updatePlanPreview();
-  }));
-
-  // Item checkboxes → trigger preview update + sequential reorder
-  document.getElementById('planItemPicker').addEventListener('change',()=>{ renderSequentialOrder(); updatePlanPreview(); });
-
-  renderPlanMiniCal();
-  renderSequentialOrder();
-  updatePlanPreview();
-
-  // Quick chips
-  document.getElementById('chipNoWeekend').onclick=()=>{
-    planModalState.days.forEach(d=>{ const dow=new Date(d+'T00:00:00').getDay(); if(dow===0||dow===6) planModalState.days.delete(d); });
-    renderPlanMiniCal(); updatePlanPreview();
-  };
-  document.getElementById('chipClearAll').onclick=()=>{ planModalState.days.clear(); renderPlanMiniCal(); updatePlanPreview(); };
-
-  // Cal nav
-  document.getElementById('planCalPrev').onclick=()=>{ planModalState.month--; if(planModalState.month<0){planModalState.month=11;planModalState.year--;} renderPlanMiniCal(); };
-  document.getElementById('planCalNext').onclick=()=>{ planModalState.month++; if(planModalState.month>11){planModalState.month=0;planModalState.year++;} renderPlanMiniCal(); };
-
-  openModal('planModal');
+window.deleteBlock=function(id){
+  if(!confirm('Eliminare questo blocco?'))return;
+  state.studyBlocks=state.studyBlocks.filter(b=>b.id!==id);
+  save(); renderPlanningView();
+  if(document.getElementById('view-calendario').classList.contains('active')) renderCalendar();
 };
 
-function renderPlanMiniCal(){
-  const {month,year,days}=planModalState;
-  const months=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
-  document.getElementById('planCalMonthLabel').textContent=`${months[month]} ${year}`;
-
-  const firstDay=new Date(year,month,1).getDay();
-  const startOffset=(firstDay+6)%7;
-  const daysInMonth=new Date(year,month+1,0).getDate();
-  const daysInPrev=new Date(year,month,0).getDate();
-  const todayStr=today();
-
-  let html='<div class="plan-mini-cal-weekdays">';
-  ['L','M','M','G','V','S','D'].forEach(d=>html+=`<div class="pmcw">${d}</div>`);
-  html+='</div><div class="plan-mini-cal-days">';
-
-  for(let i=startOffset-1;i>=0;i--) html+=`<div class="pmc-day other-month"><span>${daysInPrev-i}</span></div>`;
-
-  for(let d=1;d<=daysInMonth;d++){
-    const ds=`${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const isSelected=days.has(ds);
-    const isToday=ds===todayStr;
-    const dow=new Date(ds+'T00:00:00').getDay();
-    const isWE=dow===0||dow===6;
-    const cls=['pmc-day',isSelected?'selected':'',isToday?'today':'',isWE?'weekend':''].filter(Boolean).join(' ');
-    html+=`<div class="${cls}" data-date="${ds}"><span>${d}</span></div>`;
-  }
-
-  const total=startOffset+daysInMonth;
-  for(let i=1;i<=(7-(total%7))%7;i++) html+=`<div class="pmc-day other-month"><span>${i}</span></div>`;
-  html+='</div>';
-
-  const container=document.getElementById('planMiniCal');
-  container.innerHTML=html;
-
-  // DRAG selection
-  let isMouseDown=false, dragMode='add', dragStart=null;
-
-  container.addEventListener('mousedown',e=>{
-    const day=e.target.closest('.pmc-day:not(.other-month)');
-    if(!day)return;
-    e.preventDefault();
-    isMouseDown=true;
-    const ds=day.dataset.date;
-    // ctrl+click = remove single day
-    if(e.ctrlKey||e.metaKey){ planModalState.days.delete(ds); renderPlanMiniCal(); updatePlanPreview(); return; }
-    dragMode=planModalState.days.has(ds)?'remove':'add';
-    dragStart=ds;
-    planModalState.days[dragMode==='add'?'add':'delete'](ds);
-    day.classList.toggle('selected',dragMode==='add');
-  });
-
-  container.addEventListener('mouseover',e=>{
-    if(!isMouseDown)return;
-    const day=e.target.closest('.pmc-day:not(.other-month)');
-    if(!day)return;
-    const ds=day.dataset.date;
-    planModalState.days[dragMode==='add'?'add':'delete'](ds);
-    day.classList.toggle('selected',dragMode==='add');
-    updatePlanPreview();
-  });
-
-  document.addEventListener('mouseup',()=>{ if(isMouseDown){isMouseDown=false;updatePlanPreview();} },{once:true});
-
-  // Touch support
-  container.addEventListener('touchstart',e=>{
-    const touch=e.touches[0];
-    const el=document.elementFromPoint(touch.clientX,touch.clientY);
-    const day=el?.closest?.('.pmc-day:not(.other-month)');
-    if(!day)return;
-    const ds=day.dataset.date;
-    dragMode=planModalState.days.has(ds)?'remove':'add';
-    planModalState.days[dragMode==='add'?'add':'delete'](ds);
-    renderPlanMiniCal(); updatePlanPreview();
-  },{passive:true});
-
-  container.addEventListener('touchmove',e=>{
-    e.preventDefault();
-    const touch=e.touches[0];
-    const el=document.elementFromPoint(touch.clientX,touch.clientY);
-    const day=el?.closest?.('.pmc-day:not(.other-month)');
-    if(!day)return;
-    const ds=day.dataset.date;
-    planModalState.days[dragMode==='add'?'add':'delete'](ds);
-    day.classList.toggle('selected',dragMode==='add');
-    updatePlanPreview();
-  },{passive:false});
-}
-
-function collectPlanItems(){
-  return [...document.querySelectorAll('.plan-item-cb:checked')].map(cb=>({
-    examId:cb.dataset.examid, bookIdx:+cb.dataset.bookidx, type:cb.dataset.type,
-  }));
-}
-
-function renderPlanItemPicker(selectedItems){
-  const container=document.getElementById('planItemPicker');
-  const selectedKeys=new Set(selectedItems.map(i=>itemKey(i.examId,i.bookIdx,i.type)));
-  if(!state.exams.length){container.innerHTML='<p style="color:var(--ink-light);font-size:13px">Aggiungi prima degli esami.</p>';return;}
-  container.innerHTML=state.exams.map(exam=>{
-    const items=examItems(exam).filter(i=>i.type!=='exam');
-    if(!items.length)return'';
-    return `<div class="plan-exam-group">
-      <div class="plan-exam-group-header" style="color:${exam.color}">
-        <span style="background:${exam.color};width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px"></span>
-        ${exam.name}
-        <button class="btn-ghost" style="font-size:11px;padding:2px 8px;margin-left:8px" onclick="toggleAllExamItems('${exam.id}',this)">Seleziona tutto</button>
-      </div>
-      <div class="plan-exam-items">${items.map(i=>{
-        const key=itemKey(i.examId,i.bookIdx,i.type);
-        const checked=selectedKeys.has(key);
-        const icon=i.type==='book'?'📖':i.type==='slides'?'🖥️':'🎬';
-        return `<label class="plan-item-row ${checked?'checked':''}">
-          <input type="checkbox" class="plan-item-cb" data-examid="${i.examId}" data-bookidx="${i.bookIdx}" data-type="${i.type}"
-            ${checked?'checked':''} onchange="this.closest('label').classList.toggle('checked',this.checked)">
-          <span class="plan-item-icon">${icon}</span>
-          <span class="plan-item-label">${i.label}</span>
-        </label>`;
-      }).join('')}</div>
-    </div>`;
-  }).join('');
-}
-
-window.toggleAllExamItems=function(examId,btn){
-  const group=btn.closest('.plan-exam-group');
-  const cbs=group.querySelectorAll('.plan-item-cb');
-  const allChecked=[...cbs].every(cb=>cb.checked);
-  cbs.forEach(cb=>{cb.checked=!allChecked;cb.closest('label').classList.toggle('checked',!allChecked);});
-  btn.textContent=allChecked?'Seleziona tutto':'Deseleziona tutto';
-  renderSequentialOrder(); updatePlanPreview();
-};
-
-// Sequential order UI
-function renderSequentialOrder(){
-  const cfg=document.getElementById('sequentialConfig');
-  if(cfg.classList.contains('hidden'))return;
-  const items=collectPlanItems().filter(i=>i.type==='book');
-  const existing=(document.getElementById('sequentialOrder')?.querySelectorAll('.seq-item')||[]);
-  // preserve existing weights
-  const weights={};
-  existing.forEach(el=>{ weights[el.dataset.key]=+el.querySelector('.seq-weight').value||0; });
-
-  const totalWeight=items.length?Math.round(100/items.length):100;
-  document.getElementById('sequentialOrder').innerHTML=items.map((item,idx)=>{
-    const exam=state.exams.find(e=>e.id===item.examId);
-    const book=(exam?.books||[])[item.bookIdx];
-    const key=itemKey(item.examId,item.bookIdx,item.type);
-    const w=weights[key]||totalWeight;
-    return `<div class="seq-item" data-key="${key}" data-examid="${item.examId}" data-bookidx="${item.bookIdx}" draggable="true">
-      <span class="seq-handle">⠿</span>
-      <span class="seq-dot" style="background:${exam?.color}"></span>
-      <span class="seq-label">${book?.title||`Libro ${item.bookIdx+1}`}</span>
-      <div class="seq-weight-group">
-        <input type="number" class="seq-weight" min="1" max="100" value="${w}" onchange="updatePlanPreview()">
-        <span>%</span>
-      </div>
-    </div>`;
-  }).join('');
-
-  // Drag-to-reorder
-  initSeqDrag();
-}
-
-function initSeqDrag(){
-  const container=document.getElementById('sequentialOrder');
-  let dragged=null;
-  container.querySelectorAll('.seq-item').forEach(item=>{
-    item.addEventListener('dragstart',()=>{ dragged=item; item.style.opacity='0.4'; });
-    item.addEventListener('dragend',()=>{ item.style.opacity='1'; dragged=null; updatePlanPreview(); });
-    item.addEventListener('dragover',e=>{ e.preventDefault(); if(dragged&&item!==dragged){ container.insertBefore(dragged,item); }});
-  });
-}
-
-// ===== LIVE PLAN PREVIEW =====
-function updatePlanPreview(){
-  const preview=document.getElementById('planPreview');
-  const days=[...planModalState.days].sort();
-  const items=collectPlanItems();
-  const mode=document.getElementById('modeSequential').checked?'sequential':'parallel';
-
-  if(!days.length||!items.length){
-    preview.innerHTML='<p class="plan-preview-empty">Seleziona dei giorni e dei materiali per vedere il piano giornaliero</p>';
+// ===== PLANNING VIEW =====
+function renderPlanningView(){
+  const simSel=document.getElementById('simExam'); if(!simSel)return;
+  const cur=simSel.value;
+  simSel.innerHTML='<option value="">— Seleziona esame —</option>'+
+    state.exams.map(e=>`<option value="${e.id}"${e.id===cur?' selected':''}>${e.name}</option>`).join('');
+  simSel.onchange=()=>renderSimResults();
+  renderSimRows(); renderSimResults();
+  const el=document.getElementById('blocksGrid'); if(!el)return;
+  if(!state.studyBlocks.length){
+    el.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><div class="empty-state-icon">📋</div><p>Nessun blocco ancora.</p><button class="btn-primary" style="margin-top:12px" onclick="openBlockModal(null)">+ Crea il primo blocco</button></div>`;
     return;
   }
-
-  const nDays=days.length;
-  let html=`<div class="preview-header"><strong>${nDays} giorni selezionati</strong> · modalità <em>${mode==='parallel'?'parallelo':'successione'}</em></div>`;
-
-  const bookItems=items.filter(i=>i.type==='book');
-  const nonBookItems=items.filter(i=>i.type!=='book');
-
-  if(mode==='parallel'){
-    html+='<div class="preview-rows">';
-    bookItems.forEach(item=>{
-      const exam=state.exams.find(e=>e.id===item.examId);
-      const book=(exam?.books||[])[item.bookIdx];
-      if(!book?.totalPages){
-        html+=`<div class="preview-row warn">⚠️ ${exam?.name} — ${book?.title||'?'}: inserisci le pagine totali</div>`;
-        return;
-      }
-      const done=book.pagesRead||0;
-      const remaining=Math.max(0,book.totalPages-done);
-      const perDay=Math.ceil(remaining/nDays);
-      html+=`<div class="preview-row">
-        <span class="pr-dot" style="background:${exam?.color}"></span>
-        <span class="pr-name">${exam?.name} — ${book?.title}</span>
-        <span class="pr-pages">${remaining} pp rimaste → <strong>${perDay} pp/giorno</strong></span>
-      </div>`;
-    });
-  } else {
-    // Sequential: distribute days by weight
-    const seqItems=[...document.querySelectorAll('#sequentialOrder .seq-item')];
-    const totalW=seqItems.reduce((s,el)=>s+(+el.querySelector('.seq-weight').value||0),0)||1;
-    let cumDays=0;
-    html+='<div class="preview-rows">';
-    seqItems.forEach((el,i)=>{
-      const examId=el.dataset.examid, bookIdx=+el.dataset.bookidx;
-      const exam=state.exams.find(e=>e.id===examId);
-      const book=(exam?.books||[])[bookIdx];
-      const w=+el.querySelector('.seq-weight').value||0;
-      const myDays=i===seqItems.length-1?nDays-cumDays:Math.round((w/totalW)*nDays);
-      cumDays+=myDays;
-      if(!book?.totalPages){
-        html+=`<div class="preview-row warn">⚠️ ${exam?.name} — ${book?.title||'?'}: inserisci le pagine totali</div>`;
-        return;
-      }
-      const remaining=Math.max(0,book.totalPages-(book.pagesRead||0));
-      const perDay=myDays?Math.ceil(remaining/myDays):0;
-      html+=`<div class="preview-row">
-        <span class="pr-dot" style="background:${exam?.color}"></span>
-        <span class="pr-name">${exam?.name} — ${book?.title}</span>
-        <span class="pr-pages">${myDays} giorni · ${remaining} pp → <strong>${perDay} pp/giorno</strong></span>
-      </div>`;
-    });
-    if(!seqItems.length) bookItems.forEach(item=>{
-      const exam=state.exams.find(e=>e.id===item.examId);
-      const book=(exam?.books||[])[item.bookIdx];
-      html+=`<div class="preview-row warn">⚠️ ${exam?.name} — ${book?.title||'?'}: riordina nella sezione "successione"</div>`;
-    });
-  }
-
-  // Non-book items
-  nonBookItems.forEach(item=>{
-    const exam=state.exams.find(e=>e.id===item.examId);
-    const isSlides=item.type==='slides';
-    const total=isSlides?(exam?.slidesTotal||0):(exam?.videoTotal||0);
-    const done=isSlides?(exam?.slidesDone||0):(exam?.videoDone||0);
-    const label=isSlides?'slides':'min video';
-    if(!total) return;
-    const rem=Math.max(0,total-done);
-    html+=`<div class="preview-row">
-      <span class="pr-dot" style="background:${exam?.color}"></span>
-      <span class="pr-name">${exam?.name} — ${isSlides?'🖥️ Slides':'🎬 Video'}</span>
-      <span class="pr-pages">${rem} ${label} → <strong>${Math.ceil(rem/nDays)} ${label}/giorno</strong></span>
-    </div>`;
-  });
-
-  html+='</div>';
-  preview.innerHTML=html;
-}
-
-document.getElementById('savePlanBtn').addEventListener('click',()=>{
-  const label=document.getElementById('planLabel').value.trim();
-  const days=[...planModalState.days].sort();
-  if(!days.length){alert('Seleziona almeno un giorno sul calendario!');return;}
-  const items=collectPlanItems();
-  const mode=document.getElementById('modeSequential').checked?'sequential':'parallel';
-
-  // Collect sequential order
-  const seqOrder=[...document.querySelectorAll('#sequentialOrder .seq-item')].map(el=>({
-    examId:el.dataset.examid, bookIdx:+el.dataset.bookidx, type:'book',
-    weight:+el.querySelector('.seq-weight').value||0,
-  }));
-
-  const plan={
-    id:state.editingPlanId||uid(),
-    label:label||`Piano ${fmtShort(days[0])}–${fmtShort(days[days.length-1])}`,
-    days, items, studyMode:mode, sequentialOrder:seqOrder,
-  };
-
-  if(state.editingPlanId){const i=state.studyPlans.findIndex(p=>p.id===state.editingPlanId);if(i>=0)state.studyPlans[i]=plan;}
-  else state.studyPlans.push(plan);
-
-  save(); closeModal('planModal'); renderPlansView();
-  if(document.getElementById('view-calendario').classList.contains('active')) renderCalendar();
-});
-
-window.deletePlan=function(id){
-  if(!confirm('Eliminare questo piano?'))return;
-  state.studyPlans=state.studyPlans.filter(p=>p.id!==id);
-  save(); renderPlansView();
-};
-
-// ===== PLANS VIEW =====
-function renderPlansView(){
-  const el=document.getElementById('plansGrid');
-  if(!state.studyPlans.length){el.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><div class="empty-state-icon">📋</div><p>Nessun piano ancora. Clicca "+ Nuovo piano".</p></div>`;return;}
-  el.innerHTML=state.studyPlans.map(p=>{
-    const days=p.days||[];
-    const items=p.items||[];
-    const byExam={};
-    items.forEach(i=>{if(!byExam[i.examId])byExam[i.examId]=[];byExam[i.examId].push(i);});
-    const chips=Object.entries(byExam).map(([eid,its])=>{
-      const exam=state.exams.find(e=>e.id===eid);if(!exam)return'';
-      const labels=its.filter(i=>i.type!=='exam').map(i=>i.type==='slides'?'🖥️ Slides':i.type==='video'?'🎬 Video':`📖 ${(exam.books||[])[i.bookIdx]?.title||'?'}`);
-      if(!labels.length)return'';
-      return `<div class="plan-exam-chip" style="border-left:3px solid ${exam.color}"><strong style="color:${exam.color}">${exam.name}</strong><div class="plan-chip-items">${labels.join(' · ')}</div></div>`;
+  el.innerHTML=state.studyBlocks.map(block=>{
+    const exam=block.examId?state.exams.find(e=>e.id===block.examId):null;
+    const days=blockDays(block).length;
+    const wdLabels=['Dom','Lun','Mar','Mer','Gio','Ven','Sab'];
+    const activeDows=blockActiveWeekdays(block);
+    const wdSummary=activeDows.length===7?'':' · '+(activeDows.length===5&&!activeDows.includes(0)&&!activeDows.includes(6)?'solo feriali':activeDows.slice().sort().map(d=>wdLabels[d]).join('/'));
+    const refDate=blockReferenceDate(block);
+    const autoHtml=(block.autoItems||[]).map(it=>{
+      if(!refDate||!exam)return'';
+      const pace=autoPaceOnDate(block,it,refDate,exam);
+      if(!pace)return'';
+      return pace.done?`<span class="pace-chip">✓ ${pace.label} finito</span>`:`<span class="pace-chip"><strong>${pace.perDay} ${pace.unit}/g</strong> ${pace.label}</span>`;
     }).join('');
-    const modeLabel=p.studyMode==='sequential'?'📚 Successione':'📖 Parallelo';
-    return `<div class="plan-card">
-      <div class="plan-card-header">
+    return `<div class="block-card" style="border-left:4px solid ${block.color}">
+      <div class="block-card-header">
         <div>
-          <div class="plan-card-title">${p.label||'Piano'}</div>
-          <div class="plan-card-dates">📅 <strong>${days.length} giorni</strong> · ${days[0]?fmtShort(days[0]):'?'} → ${days[days.length-1]?fmtShort(days[days.length-1]):'?'} · ${modeLabel}</div>
+          <div class="block-card-title">${block.label}</div>
+          <div class="block-card-meta">📅 ${fmtShort(block.startDate)} → ${fmtShort(block.endDate)} · <strong>${days} giorn${days===1?'o':'i'}</strong>${wdSummary}</div>
+          ${exam?`<div class="block-card-exam" style="color:${exam.color}">🎓 ${exam.name}</div>`:''}
         </div>
-        <div style="display:flex;gap:4px">
-          <button class="btn-icon" onclick="openPlanModal('${p.id}')">✏️</button>
-          <button class="btn-icon" onclick="deletePlan('${p.id}')">🗑️</button>
+        <div style="display:flex;gap:4px;flex-shrink:0">
+          <button class="btn-icon" onclick="openBlockModal('${block.id}')">✏️</button>
+          <button class="btn-icon" onclick="deleteBlock('${block.id}')">🗑️</button>
         </div>
       </div>
-      <div class="plan-card-body">${chips||'<p style="color:var(--ink-light);font-size:13px">Nessun materiale selezionato</p>'}</div>
+      ${autoHtml?`<div class="exam-pace-items" style="margin-bottom:8px">${autoHtml}</div>`:''}
+      ${block.tasks.length?`<ul class="block-card-tasks">${block.tasks.map(t=>`<li>${t.text}</li>`).join('')}</ul>`:''}
+      ${(!block.tasks.length&&!autoHtml)?'<p style="color:var(--ink-light);font-size:12px;padding:4px 0">Nessuna attività</p>':''}
     </div>`;
   }).join('');
 }
+
+// ===== SCENARIO SIMULATOR =====
+window.addSimRow=function(type){
+  simRows.push(type==='days'?{type:'days',days:15}:{type:'date',date:'',excl:false});
+  renderSimRows(); renderSimResults();
+};
+window.renderSimRows=renderSimRows;
+window.renderSimResults=renderSimResults;
+function renderSimRows(){
+  const container=document.getElementById('simScenarioRows'); if(!container)return;
+  if(!simRows.length){container.innerHTML='<p style="color:var(--ink-light);font-size:13px;padding:8px 0">Aggiungi uno scenario cliccando i pulsanti qui sotto →</p>';return;}
+  container.innerHTML=simRows.map((row,i)=>{
+    if(row.type==='days') return `<div class="sim-row">
+      <span class="sim-row-label">Scenario ${i+1}: se studiassi</span>
+      <input type="number" class="sim-days-input" min="1" max="365" value="${row.days}"
+        onchange="window.simRows[${i}].days=Math.max(1,+this.value||15);window.renderSimResults()">
+      <span>giorni</span>
+      <button class="btn-icon" onclick="window.simRows.splice(${i},1);window.renderSimRows();window.renderSimResults()">✕</button>
+    </div>`;
+    return `<div class="sim-row">
+      <span class="sim-row-label">Scenario ${i+1}: fino al</span>
+      <input type="date" class="sim-date-input" value="${row.date}"
+        onchange="window.simRows[${i}].date=this.value;window.renderSimResults()">
+      <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox"${row.excl?' checked':''}
+        onchange="window.simRows[${i}].excl=this.checked;window.renderSimResults()"> no WE</label>
+      <button class="btn-icon" onclick="window.simRows.splice(${i},1);window.renderSimRows();window.renderSimResults()">✕</button>
+    </div>`;
+  }).join('');
+}
+function renderSimResults(){
+  const examId=document.getElementById('simExam')?.value;
+  const exam=state.exams.find(e=>e.id===examId);
+  const el=document.getElementById('simResultsArea'); if(!el)return;
+  if(!exam||!simRows.length){el.innerHTML='';return;}
+  // Compute days per scenario
+  const scenarios=simRows.map((row,i)=>{
+    let days; const t=today();
+    if(row.type==='days'){days=Math.max(1,row.days||1);}
+    else if(!row.date||row.date<t){days=0;}
+    else{
+      let cur=new Date(t+'T00:00:00'),end=new Date(row.date+'T00:00:00');days=0;
+      while(cur<=end){const dow=cur.getDay();if(!row.excl||(dow!==0&&dow!==6))days++;cur.setDate(cur.getDate()+1);}
+    }
+    const label=row.type==='days'?`${row.days} gg`:(row.excl?`al ${fmtShort(row.date)}<br><small>no WE — ${days}gg</small>`:`al ${fmtShort(row.date)}<br><small>${days} gg</small>`);
+    return{...row,idx:i,days,label};
+  });
+  // Materials remaining
+  const materials=[];
+  (exam.books||[]).forEach((b,i)=>{
+    if(!b.totalPages)return;
+    materials.push({label:b.title||`Libro ${i+1}`,rem:Math.max(0,b.totalPages-(b.pagesRead||0)),unit:'pp'});
+  });
+  if(exam.hasSlides&&exam.slidesTotal) materials.push({label:'🖥️ Slides',rem:Math.max(0,exam.slidesTotal-(exam.slidesDone||0)),unit:'slides'});
+  if(exam.hasVideo&&exam.videoTotal)   materials.push({label:'🎬 Video', rem:Math.max(0,exam.videoTotal-(exam.videoDone||0)),unit:'min'});
+  if(!materials.length){el.innerHTML='<p style="color:var(--ink-light);font-size:13px;margin-top:12px">Inserisci i materiali nell\'esame (pagine totali, slides, ecc.) per vedere i calcoli.</p>';return;}
+  let html=`<div class="sim-table-wrap"><table class="sim-table"><thead><tr><th>Materiale</th><th>Rimaste</th>${scenarios.map(s=>`<th>${s.label}</th>`).join('')}</tr></thead><tbody>`;
+  materials.forEach(m=>{
+    html+=`<tr><td>${m.label}</td><td class="text-mono">${m.rem} ${m.unit}</td>`;
+    scenarios.forEach(s=>{
+      if(s.days<=0){html+=`<td class="sim-cell warn">data passata</td>`;return;}
+      if(!m.rem){html+=`<td class="sim-cell done">✓ finito</td>`;return;}
+      html+=`<td class="sim-cell"><strong>${Math.ceil(m.rem/s.days)}</strong> ${m.unit}/g</td>`;
+    });
+    html+='</tr>';
+  });
+  html+='</tbody></table></div>';
+  el.innerHTML=html;
+}
+
+// ===== BLOCK MODAL =====
+function renderBlockExamSelect(selectedId){
+  const sel=document.getElementById('blockExam'); if(!sel)return;
+  sel.innerHTML='<option value="">— nessuno —</option>'+
+    state.exams.map(e=>`<option value="${e.id}"${e.id===selectedId?' selected':''}>${e.name}</option>`).join('');
+}
+function renderBlockTaskEntries(container,tasks){
+  container.innerHTML=tasks.map(t=>`<div class="block-task-entry">
+    <input type="text" class="block-task-text" value="${(t.text||'').replace(/"/g,'&quot;')}" placeholder="es. ripetere ad alta voce cap 2, 2 capovolte...">
+    <button class="btn-icon" onclick="this.closest('.block-task-entry').remove()">✕</button>
+  </div>`).join('');
+}
+function collectBlockTasks(){
+  return[...document.querySelectorAll('.block-task-entry')].map(e=>({
+    id:uid(),text:e.querySelector('.block-task-text').value.trim()
+  })).filter(t=>t.text);
+}
+
+// --- Weekday picker (Lun-Dom chips) ---
+function initWeekdayPicker(activeDows){
+  const picker=document.getElementById('blockWeekdayPicker'); if(!picker)return;
+  picker.querySelectorAll('.wd-chip').forEach(chip=>{
+    const dow=+chip.dataset.dow;
+    chip.classList.toggle('active',activeDows.includes(dow));
+    chip.onclick=()=>{ chip.classList.toggle('active'); updateBlockDaysPreview(); };
+  });
+}
+function getSelectedWeekdaysFromUI(){
+  return [...document.querySelectorAll('#blockWeekdayPicker .wd-chip.active')].map(c=>+c.dataset.dow);
+}
+document.getElementById('wdPresetAll')?.addEventListener('click',()=>{
+  document.querySelectorAll('#blockWeekdayPicker .wd-chip').forEach(c=>c.classList.add('active'));
+  updateBlockDaysPreview();
+});
+document.getElementById('wdPresetWeekdays')?.addEventListener('click',()=>{
+  document.querySelectorAll('#blockWeekdayPicker .wd-chip').forEach(c=>c.classList.toggle('active',['1','2','3','4','5'].includes(c.dataset.dow)));
+  updateBlockDaysPreview();
+});
+
+// --- Auto-calculated materials picker ---
+let editingBlockAutoItemsTemp=null; // saved selection when editing a block; null = new block (default: all checked)
+function renderBlockMaterialsSection(){
+  const examId=document.getElementById('blockExam')?.value;
+  const exam=examId?state.exams.find(e=>e.id===examId):null;
+  const section=document.getElementById('blockMaterialsSection');
+  const list=document.getElementById('blockMaterialsList');
+  if(!section||!list)return;
+  if(!exam){ section.classList.add('hidden'); list.innerHTML=''; return; }
+  const materials=examMaterials(exam);
+  section.classList.remove('hidden');
+  if(!materials.length){
+    list.innerHTML=`<p style="font-size:12px;color:var(--ink-light)">Aggiungi pagine totali, slides o video a "${exam.name}" per attivare il calcolo automatico.</p>`;
+    return;
+  }
+  const start=document.getElementById('blockStart').value, end=document.getElementById('blockEnd').value;
+  const activeDows=getSelectedWeekdaysFromUI();
+  let nDays=0;
+  if(start&&end&&end>=start&&activeDows.length){
+    let cur=new Date(start+'T00:00:00'),endDate=new Date(end+'T00:00:00');
+    while(cur<=endDate){ if(activeDows.includes(cur.getDay()))nDays++; cur.setDate(cur.getDate()+1); }
+  }
+  list.innerHTML=materials.map(m=>{
+    const checked = editingBlockAutoItemsTemp!==null
+      ? editingBlockAutoItemsTemp.some(s=>s.type===m.type&&(s.bookIdx??null)===(m.bookIdx??null))
+      : true;
+    const remaining=Math.max(0,m.total-m.done);
+    const perDay=nDays>0?Math.ceil(remaining/nDays):null;
+    return `<label class="block-material-row${checked?' checked':''}">
+      <input type="checkbox" class="block-material-cb" data-type="${m.type}" data-bookidx="${m.bookIdx??''}" ${checked?'checked':''} onchange="this.closest('label').classList.toggle('checked',this.checked)">
+      <span class="block-material-icon">${m.icon}</span>
+      <span class="block-material-label">${m.label}</span>
+      <span class="block-material-pace">${remaining} ${m.unit} rimaste${perDay!=null?` → <strong>${perDay} ${m.unit}/g</strong>`:''}</span>
+    </label>`;
+  }).join('');
+}
+function collectBlockAutoItems(){
+  return [...document.querySelectorAll('.block-material-cb:checked')].map(cb=>({
+    type:cb.dataset.type, bookIdx: cb.dataset.bookidx===''?null:+cb.dataset.bookidx
+  }));
+}
+
+window.updateBlockDaysPreview=function(){
+  const start=document.getElementById('blockStart')?.value;
+  const end=document.getElementById('blockEnd')?.value;
+  const el=document.getElementById('blockDaysPreview'); if(!el){renderBlockMaterialsSection();return;}
+  const activeDows=getSelectedWeekdaysFromUI();
+  if(!start||!end){el.textContent='';renderBlockMaterialsSection();return;}
+  if(end<start){el.innerHTML='⚠️ La data di fine è prima di quella di inizio';renderBlockMaterialsSection();return;}
+  let count=0,cur=new Date(start+'T00:00:00'),endDate=new Date(end+'T00:00:00');
+  while(cur<=endDate){if(activeDows.includes(cur.getDay()))count++;cur.setDate(cur.getDate()+1);}
+  el.innerHTML=`📅 <strong>${count} giorn${count===1?'o':'i'}</strong> di studio · dal ${fmt(start)} al ${fmt(end)}`;
+  renderBlockMaterialsSection();
+};
+document.getElementById('btnAddBlock').addEventListener('click',()=>openBlockModal(null));
+window.openBlockModal=function(blockId){
+  state.editingBlockId=blockId;
+  const block=blockId?state.studyBlocks.find(b=>b.id===blockId):null;
+  document.getElementById('blockModalTitle').textContent=block?'Modifica Blocco':'Nuovo Blocco di Studio';
+  document.getElementById('blockLabel').value=block?.label||'';
+  document.getElementById('blockStart').value=block?.startDate||'';
+  document.getElementById('blockEnd').value=block?.endDate||'';
+  renderBlockExamSelect(block?.examId||'');
+  document.getElementById('blockExam').onchange=()=>{ editingBlockAutoItemsTemp = null; renderBlockMaterialsSection(); };
+  const tc=document.getElementById('blockTasksList');
+  renderBlockTaskEntries(tc,block?.tasks?.length?block.tasks:[{text:''}]);
+  document.getElementById('addBlockTaskBtn').onclick=()=>renderBlockTaskEntries(tc,[...collectBlockTasks(),{text:''}]);
+
+  initWeekdayPicker(block?blockActiveWeekdays(block):[1,2,3,4,5,6,0]);
+  editingBlockAutoItemsTemp = block ? (block.autoItems||[]) : null;
+
+  updateBlockDaysPreview();
+  openModal('blockModal');
+};
+document.getElementById('saveBlockBtn').addEventListener('click',()=>{
+  const label=document.getElementById('blockLabel').value.trim();
+  const startDate=document.getElementById('blockStart').value;
+  const endDate=document.getElementById('blockEnd').value;
+  if(!startDate||!endDate){alert('Inserisci le date!');return;}
+  if(endDate<startDate){alert('La data di fine deve essere dopo quella di inizio!');return;}
+  const activeWeekdays=getSelectedWeekdaysFromUI();
+  if(!activeWeekdays.length){alert('Seleziona almeno un giorno della settimana!');return;}
+  const examId=document.getElementById('blockExam').value||null;
+  const exam=examId?state.exams.find(e=>e.id===examId):null;
+  const tasks=collectBlockTasks();
+  const autoItems=collectBlockAutoItems();
+  const block={
+    id:state.editingBlockId||uid(),
+    label:label||`Blocco ${fmtShort(startDate)}–${fmtShort(endDate)}`,
+    examId,color:exam?.color||'#3548c0',
+    startDate,endDate,
+    activeWeekdays,
+    tasks, autoItems,
+  };
+  if(state.editingBlockId){const i=state.studyBlocks.findIndex(b=>b.id===state.editingBlockId);if(i>=0)state.studyBlocks[i]=block;}
+  else state.studyBlocks.push(block);
+  save();closeModal('blockModal');renderPlanningView();
+  if(document.getElementById('view-calendario').classList.contains('active'))renderCalendar();
+});
 
 // ===== CALENDAR =====
 function renderCalendar(){
@@ -982,6 +906,9 @@ function renderCalendar(){
   const daysInMonth=new Date(state.calYear,state.calMonth+1,0).getDate();
   const daysInPrev=new Date(state.calYear,state.calMonth,0).getDate();
   const todayStr=today();
+  const fromDate=`${state.calYear}-${String(state.calMonth+1).padStart(2,'0')}-01`;
+  const toDate=`${state.calYear}-${String(state.calMonth+1).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`;
+  const dateBlockMap=buildDateBlockMap(fromDate,toDate);
   let html='<div class="cal-weekdays">';
   ['Lun','Mar','Mer','Gio','Ven','Sab','Dom'].forEach(d=>html+=`<div class="cal-weekday">${d}</div>`);
   html+='</div><div class="cal-days">';
@@ -989,25 +916,19 @@ function renderCalendar(){
   for(let d=1;d<=daysInMonth;d++){
     const ds=`${state.calYear}-${String(state.calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const dayData=state.calendar[ds]||{};
-    const isActive=isDayActive(ds);
+    const dayBlocks=dateBlockMap[ds]||[];
+    const isActive=dayBlocks.length>0;
     const isToday=ds===todayStr;
-    const hasOverride=dayData.overrideItems!==undefined&&dayData.overrideItems!==null;
     const appellExams=state.exams.filter(e=>(e.appells||[]).some(a=>a.date===ds));
     let pills='';
-    if(isActive){
-      const tasks=computeDailyTasks(ds);
-      const activeItems=activeItemsForDate(ds);
-      const seen=new Set();
-      [...tasks.map(t=>t.examId),...activeItems.filter(i=>i.type!=='exam').map(i=>i.examId)].forEach(eid=>{
-        if(seen.has(eid))return;seen.add(eid);
-        const ex=state.exams.find(e=>e.id===eid);if(!ex)return;
-        const total=tasks.filter(x=>x.examId===eid).reduce((s,x)=>s+x.target,0);
-        const label=total>0?`${ex.name.split(' ')[0]} ${total}pp`:ex.name.split(' ')[0];
-        pills+=`<span class="cal-pill" style="background:${ex.color};opacity:${total>0?1:0.65}">${label}</span>`;
-      });
-    }
-    const cls=['cal-day',isToday?'today':'',isActive?'study-day':'',appellExams.length?'has-appell':'',hasOverride?'has-override':''].filter(Boolean).join(' ');
-    html+=`<div class="${cls}" onclick="handleDayClick('${ds}')"><span class="cal-day-num">${d}</span>${hasOverride?'<span class="override-dot">✦</span>':''}<div class="cal-day-pills">${pills}</div></div>`;
+    const seen=new Set();
+    dayBlocks.forEach(block=>{
+      if(seen.has(block.id))return;seen.add(block.id);
+      const allDone=(block.tasks||[]).length>0&&(block.tasks||[]).every(t=>dayData.completions?.[t.id]);
+      pills+=`<span class="cal-pill" style="background:${block.color};opacity:${allDone?1:0.75}">${allDone?'✓ ':''}${block.label.split(' ')[0]}</span>`;
+    });
+    const cls=['cal-day',isToday?'today':'',isActive?'study-day':'',appellExams.length?'has-appell':''].filter(Boolean).join(' ');
+    html+=`<div class="${cls}" onclick="handleDayClick('${ds}')"><span class="cal-day-num">${d}</span><div class="cal-day-pills">${pills}</div></div>`;
   }
   const rem=(7-(startOffset+daysInMonth)%7)%7;
   for(let i=1;i<=rem;i++) html+=`<div class="cal-day other-month"><span class="cal-day-num">${i}</span></div>`;
@@ -1022,161 +943,50 @@ window.handleDayClick=function(dateStr){state.selectedDay=dateStr;renderDayPanel
 function renderDayPanel(dateStr){
   const panel=document.getElementById('dayPanel');
   const dayData=state.calendar[dateStr]||{};
-  const isStudy=!!dayData.isStudyDay;
-  const isActive=isDayActive(dateStr);
-  const hasOverride=dayData.overrideItems!==undefined&&dayData.overrideItems!==null;
+  const dayBlocks=blocksForDate(dateStr);
+  const appellExams=state.exams.filter(e=>(e.appells||[]).some(a=>a.date===dateStr));
   const months=['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
   const [y,m,d]=dateStr.split('-');
-  const label=`${parseInt(d)} ${months[parseInt(m)-1]} ${y}`;
-  const coveringPlan=[...state.studyPlans].reverse().find(p=>(p.days||[]).includes(dateStr));
-  const planBadge=hasOverride
-    ?`<div class="plan-badge override">✦ Override materiali <button class="btn-link" onclick="clearDayOverride('${dateStr}')">← Ripristina</button></div>`
-    :coveringPlan
-      ?`<div class="plan-badge" style="justify-content:space-between"><span>📋 Piano: <strong>${coveringPlan.label}</strong></span><button class="btn-link" onclick="toggleDayExclude('${dateStr}')">❌ Escludi giorno</button></div>`
-      :isStudy
-        ?`<div class="plan-badge override">📌 Segnato manualmente <button class="btn-link" onclick="toggleDayExclude('${dateStr}')">Rimuovi</button></div>`
-        :`<div class="plan-badge none">Giorno libero · <button class="btn-link" onclick="forceIncludeDay('${dateStr}')">+ Aggiungi manualmente</button></div>`;
-  const appellExams=state.exams.filter(e=>(e.appells||[]).some(a=>a.date===dateStr));
-  const appellHtml=appellExams.map(e=>`<div style="font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)">📅 <strong style="color:${e.color}">${e.name}</strong> — appello</div>`).join('');
-  const tasks=isActive?computeDailyTasks(dateStr):[];
-  const activeItems=isActive?activeItemsForDate(dateStr):[];
-  const tasksExamIds=new Set(tasks.map(t=>t.examId+':'+t.bookIdx+':'+t.type));
-  const noPagesItems=activeItems.filter(i=>i.type!=='exam'&&!tasksExamIds.has(i.examId+':'+i.bookIdx+':'+i.type));
-  let tasksHtml='';
-  if(tasks.length||noPagesItems.length){
-    const rows=tasks.map(t=>{
-      const exam=state.exams.find(e=>e.id===t.examId);
-      const logged=(dayData.logs||[]).find(l=>l.examId===t.examId&&l.bookIdx===t.bookIdx&&l.type===t.type);
-      return `<div class="day-book-entry" data-examid="${t.examId}" data-bookidx="${t.bookIdx}" data-type="${t.type}">
-        <div class="day-book-entry-name" style="color:${exam.color}">${exam.name}</div>
-        <div style="font-size:13px">${t.label}</div>
-        <div class="day-book-entry-target">Target: <span>${t.target} unità</span> <small style="color:var(--ink-light)">(${t.remaining} rimaste su ${t.daysLeft} giorni)</small></div>
-        <div class="day-input-row"><label>Fatte oggi:</label><input type="number" class="day-pages-input" value="${logged?.pages||0}" min="0"></div>
+  const dateLabel=`${parseInt(d)} ${months[parseInt(m)-1]} ${y}`;
+
+  const appellHtml=appellExams.map(e=>`<div class="day-appell-badge" style="border-left:3px solid ${e.color}">📅 <strong style="color:${e.color}">${e.name}</strong> — giorno dell'appello!</div>`).join('');
+
+  let blocksHtml='';
+  if(dayBlocks.length){
+    blocksHtml=dayBlocks.map(block=>{
+      const tasks=block.tasks||[];
+      const doneCnt=tasks.filter(t=>dayData.completions?.[t.id]).length;
+      return `<div class="day-block-section" style="border-left:3px solid ${block.color}">
+        <div class="day-block-name">${block.label}${tasks.length?` <small>(${doneCnt}/${tasks.length})</small>`:''}</div>
+        ${renderBlockDayContent(block,dateStr,dayData)}
       </div>`;
     }).join('');
-    const noRows=noPagesItems.map(i=>{
-      const exam=state.exams.find(e=>e.id===i.examId);
-      const label=i.type==='slides'?'Slides':i.type==='video'?'Videolezioni':((exam?.books||[])[i.bookIdx]?.title||`Libro ${i.bookIdx+1}`);
-      return `<div class="day-book-entry no-pages"><div style="color:${exam?.color};font-weight:600">${exam?.name}</div><div style="font-size:13px">${label}</div><div style="font-size:12px;color:var(--ink-light)">⚠️ Inserisci le pagine totali nell'esame per calcolare il target</div></div>`;
-    }).join('');
-    tasksHtml=`<div class="day-book-tasks">${rows}${noRows}</div>`;
-  } else if(isActive){
-    tasksHtml='<p style="color:var(--ink-light);font-size:13px;margin-top:8px">Nessun materiale attivo.</p>';
+  } else {
+    blocksHtml='<p class="day-no-blocks">Nessun blocco attivo. Vai su <strong>Pianifica</strong> per creare un blocco di studio con attività.</p>';
   }
-  const overridePickerHtml=isActive?`<div class="day-override-section"><div class="day-override-header"><span>🎯 Materie di oggi</span><button class="btn-ghost" style="font-size:12px;padding:4px 10px" onclick="toggleOverridePicker('${dateStr}')">+ Override per oggi</button></div><div id="overridePickerWrap" class="hidden"></div></div>`:'';
+
   panel.innerHTML=`
-    <div class="day-panel-title">${label}</div>
-    <div class="day-panel-subtitle">${isActive?coveringPlan?`📋 ${coveringPlan.label}`:isStudy?'📌 Manuale':'📋 Attivo':'⬜ Libero'}</div>
+    <div class="day-panel-title">${dateLabel}</div>
     ${appellHtml}
-    <div class="day-toggle"><label class="toggle-switch"><input type="checkbox" id="dayStudyToggle" ${isStudy?'checked':''}><span class="toggle-slider"></span></label><span>Segna manualmente</span></div>
-    ${isActive?planBadge:''}
-    ${isActive?overridePickerHtml:''}
-    ${tasksHtml}
-    ${isActive&&tasks.length?`<button class="btn-primary" style="margin-top:16px;width:100%" onclick="saveDayPanel('${dateStr}')">💾 Salva progresso</button>`:''}
-    ${!isActive?`<p style="color:var(--ink-light);font-size:13px;margin-top:8px">Nessun piano attivo. Crea un Piano di Studio o attiva il toggle.</p>`:''}
+    ${blocksHtml}
+    <div class="day-note-section">
+      <label class="day-note-label">📝 Note del giorno</label>
+      <textarea id="dayNoteInput" class="day-note-input" rows="3" placeholder="Hai fatto di più? Di meno? Note libere…">${dayData.note||''}</textarea>
+    </div>
+    <button class="btn-primary" style="margin-top:12px;width:100%" onclick="saveDayPanel('${dateStr}')">💾 Salva note</button>
   `;
-  document.getElementById('dayStudyToggle').addEventListener('change',function(){
-    if(!state.calendar[dateStr])state.calendar[dateStr]={};
-    state.calendar[dateStr].isStudyDay=this.checked;
-    save();renderDayPanel(dateStr);renderCalendar();renderDashboard();
-  });
+
+  attachBlockDayListeners(panel, dateStr);
 }
 
-window.toggleOverridePicker=function(dateStr){
-  const wrap=document.getElementById('overridePickerWrap');
-  if(!wrap.classList.contains('hidden')){wrap.classList.add('hidden');wrap.innerHTML='';return;}
-  const dayData=state.calendar[dateStr]||{};
-  const current=activeItemsForDate(dateStr);
-  const curKeys=new Set(current.map(i=>itemKey(i.examId,i.bookIdx,i.type)));
-  const all=allStudyItems().filter(i=>i.type!=='exam');
-  if(!all.length){wrap.innerHTML='<p style="font-size:13px;color:var(--ink-light)">Nessun materiale.</p>';wrap.classList.remove('hidden');return;}
-  const byExam={};
-  all.forEach(i=>{if(!byExam[i.examId])byExam[i.examId]=[];byExam[i.examId].push(i);});
-  const html=Object.entries(byExam).map(([eid,items])=>{
-    const exam=state.exams.find(e=>e.id===eid);if(!exam)return'';
-    return `<div class="plan-exam-group" style="margin-bottom:8px">
-      <div style="color:${exam.color};font-size:13px;font-weight:700;margin-bottom:4px">${exam.name}</div>
-      ${items.map(i=>{const key=itemKey(i.examId,i.bookIdx,i.type);const icon=i.type==='book'?'📖':i.type==='slides'?'🖥️':'🎬';
-        return `<label class="plan-item-row ${curKeys.has(key)?'checked':''}"><input type="checkbox" class="override-cb" data-examid="${i.examId}" data-bookidx="${i.bookIdx}" data-type="${i.type}" ${curKeys.has(key)?'checked':''} onchange="this.closest('label').classList.toggle('checked',this.checked)"><span class="plan-item-icon">${icon}</span><span>${i.label}</span></label>`;
-      }).join('')}
-    </div>`;
-  }).join('');
-  wrap.innerHTML=`<div style="background:var(--cream);border-radius:8px;padding:12px;margin-top:8px">${html}<div style="display:flex;gap:8px;margin-top:10px"><button class="btn-primary" style="flex:1" onclick="saveOverride('${dateStr}')">Applica</button><button class="btn-ghost" onclick="clearDayOverride('${dateStr}')">Ripristina piano</button></div></div>`;
-  wrap.classList.remove('hidden');
-};
-window.saveOverride=function(dateStr){
-  const items=[...document.querySelectorAll('.override-cb:checked')].map(cb=>({examId:cb.dataset.examid,bookIdx:+cb.dataset.bookidx,type:cb.dataset.type}));
-  if(!state.calendar[dateStr])state.calendar[dateStr]={};
-  state.calendar[dateStr].overrideItems=items;
-  save();renderDayPanel(dateStr);renderCalendar();
-};
-window.clearDayOverride=function(dateStr){
-  if(state.calendar[dateStr])delete state.calendar[dateStr].overrideItems;
-  save();renderDayPanel(dateStr);renderCalendar();
-};
-window.toggleDayExclude=function(dateStr){
-  if(!state.calendar[dateStr])state.calendar[dateStr]={};
-  const plan=[...state.studyPlans].reverse().find(p=>(p.days||[]).includes(dateStr));
-  if(plan){
-    plan.days=plan.days.filter(d=>d!==dateStr);
-    save();renderDayPanel(dateStr);renderCalendar();renderDashboard();
-  } else {
-    state.calendar[dateStr].isStudyDay=false;
-    save();renderDayPanel(dateStr);renderCalendar();renderDashboard();
-  }
-};
-window.forceIncludeDay=function(dateStr){
-  if(!state.calendar[dateStr])state.calendar[dateStr]={};
-  state.calendar[dateStr].isStudyDay=true;
-  save();renderDayPanel(dateStr);renderCalendar();renderDashboard();
-};
 window.saveDayPanel=function(dateStr){
   if(!state.calendar[dateStr])state.calendar[dateStr]={};
-  const logs=[...document.querySelectorAll('.day-book-entry')].map(el=>({examId:el.dataset.examid,bookIdx:+el.dataset.bookidx,type:el.dataset.type,pages:+el.querySelector('.day-pages-input')?.value||0})).filter(l=>l.examId);
-  state.calendar[dateStr].logs=logs;
-  save();renderCalendar();renderDashboard();
-  showSync('Progresso salvato 🎉','success');setTimeout(hideSync,2000);
+  state.calendar[dateStr].note=document.getElementById('dayNoteInput')?.value||'';
+  save();
+  showSync('Note salvate ✓','success');setTimeout(hideSync,1800);
 };
 
-// ===== PROJECTS =====
-document.getElementById('btnAddProject').addEventListener('click',()=>openProjectModal(null));
-window.openProjectModal=function(projectId){
-  state.editingProjectId=projectId;
-  const p=projectId?state.projects.find(x=>x.id===projectId):null;
-  document.getElementById('projectModalTitle').textContent=p?'Modifica Progetto':'Nuovo Progetto';
-  document.getElementById('projectName').value=p?p.name:'';
-  document.getElementById('projectType').value=p?p.type:'tesi';
-  renderColorPicker('projectColorPicker',p?p.color:PRESET_COLORS[3],PRESET_COLORS);
-  if(p)document.getElementById('projectCustomColor').value=p.color;
-  ['readChapTotal','readChapDone','readPagesTotal','readPagesDone','writeChapTotal','writeChapDone','writePagesTotal','writePagesDone'].forEach(id=>document.getElementById(id).value=p?(p[id]||''):'');
-  const tc=document.getElementById('projectTasks');
-  renderProjectTaskEntries(tc,p?(p.tasks||[]):[]);
-  document.getElementById('addProjectTaskBtn').onclick=()=>renderProjectTaskEntries(tc,[...collectProjectTasks(),{label:'',done:false}]);
-  openModal('projectModal');
-};
-function renderProjectTaskEntries(container,tasks){container.innerHTML=tasks.map(t=>`<div class="project-task-entry"><input type="checkbox" ${t.done?'checked':''}><input type="text" value="${t.label||''}" placeholder="Task..."><button class="btn-icon" onclick="this.closest('.project-task-entry').remove()">✕</button></div>`).join('');}
-function collectProjectTasks(){return[...document.getElementById('projectTasks').querySelectorAll('.project-task-entry')].map(e=>({done:e.querySelector('input[type=checkbox]').checked,label:e.querySelector('input[type=text]').value}));}
-document.getElementById('saveProjectBtn').addEventListener('click',()=>{
-  const name=document.getElementById('projectName').value.trim();
-  if(!name){alert('Inserisci il nome!');return;}
-  const p={id:state.editingProjectId||uid(),name,type:document.getElementById('projectType').value,color:document.getElementById('projectColorPicker').dataset.selected||PRESET_COLORS[3],tasks:collectProjectTasks()};
-  ['readChapTotal','readChapDone','readPagesTotal','readPagesDone','writeChapTotal','writeChapDone','writePagesTotal','writePagesDone'].forEach(id=>p[id]=+document.getElementById(id).value||0);
-  if(state.editingProjectId){const i=state.projects.findIndex(x=>x.id===state.editingProjectId);if(i>=0)state.projects[i]=p;}else state.projects.push(p);
-  save();closeModal('projectModal');renderProjects();
-});
-function renderProjects(){
-  const el=document.getElementById('projectsGrid');
-  if(!state.projects.length){el.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><div class="empty-state-icon">📝</div><p>Nessun progetto ancora.</p></div>`;return;}
-  const tl={tesi:'Tesi',elaborato:'Elaborato',ricerca:'Ricerca',altro:'Progetto'};
-  el.innerHTML=state.projects.map(p=>{
-    const doneTasks=(p.tasks||[]).filter(t=>t.done).length;
-    const statSec=(title,cT,cD,pgT,pgD)=>(!cT&&!pgT)?'':(`<div class="project-section"><div class="project-section-title">${title}</div><div class="project-stats">${cT?`<div class="stat-chip"><div class="stat-chip-label">Capitoli</div><div class="stat-chip-val">${cD}/${cT}</div></div>`:''} ${pgT?`<div class="stat-chip"><div class="stat-chip-label">Pagine</div><div class="stat-chip-val">${pgD}/${pgT}</div></div>`:''}</div>${(cT||pgT)?`<div class="progress-bar-bg" style="margin-top:8px"><div class="progress-bar-fill" style="width:${Math.round(((cD+pgD)/((cT||0)+(pgT||0)))*100)||0}%;background:${p.color}"></div></div>`:''}</div>`);
-    const tasksHtml=(p.tasks||[]).length?`<div class="project-section"><div class="project-section-title">🗂️ TASK (${doneTasks}/${p.tasks.length})</div><div>${p.tasks.map((t,i)=>`<div class="task-item ${t.done?'done':''}"><input type="checkbox" ${t.done?'checked':''} onchange="toggleProjectTask('${p.id}',${i},this.checked)"><span>${t.label}</span></div>`).join('')}</div></div>`:'';
-    return `<div class="project-card"><div class="project-card-header"><span class="project-card-title">${p.name}</span><div style="display:flex;gap:6px;align-items:center"><span class="project-type-badge" style="background:${p.color}">${tl[p.type]||p.type}</span><button class="btn-icon" onclick="openProjectModal('${p.id}')">✏️</button><button class="btn-icon" onclick="deleteProject('${p.id}')">🗑️</button></div></div><div class="project-card-body">${statSec('📖 DA LEGGERE',p.readChapTotal,p.readChapDone,p.readPagesTotal,p.readPagesDone)}${statSec('✍️ DA SCRIVERE',p.writeChapTotal,p.writeChapDone,p.writePagesTotal,p.writePagesDone)}${tasksHtml}</div></div>`;
-  }).join('');
-}
-window.toggleProjectTask=function(pid,i,done){const p=state.projects.find(x=>x.id===pid);if(p?.tasks?.[i]){p.tasks[i].done=done;save();renderProjects();}};
-window.deleteProject=function(id){if(!confirm('Eliminare?'))return;state.projects=state.projects.filter(x=>x.id!==id);save();renderProjects();};
+
 
 // ===== MODALS =====
 function openModal(id){document.getElementById(id).classList.add('open');}
