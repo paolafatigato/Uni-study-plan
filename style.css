@@ -222,6 +222,51 @@ body {
 
 .sidebar.collapsed ~ .main { margin-left: var(--sidebar-collapsed); }
 
+/* Mobile overlay */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 99;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.sidebar-overlay.active {
+  display: block;
+  opacity: 1;
+}
+
+/* Mobile hamburger menu */
+.mobile-hamburger {
+  display: none;
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 102;
+  background: var(--racing-red);
+  border: none;
+  color: #fff;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  font-size: 20px;
+  cursor: pointer;
+  transition: background 0.15s;
+  box-shadow: var(--shadow);
+}
+.mobile-hamburger:active {
+  background: var(--red-deep);
+}
+
+@media (max-width: 680px) {
+  .mobile-hamburger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
 /* ======= VIEWS ======= */
 .view { display: none; }
 .view.active { display: block; }
@@ -1003,11 +1048,34 @@ input:focus, select:focus, textarea:focus {
 }
 
 @media (max-width: 680px) {
-  .main { padding: 20px 16px; margin-left: 0 !important; }
-  .sidebar { transform: translateX(-100%); }
-  .sidebar.mobile-open { transform: translateX(0); }
+  .main { padding: 60px 16px 20px 16px; margin-left: 0 !important; }
+  .sidebar {
+    position: fixed;
+    width: 100% !important;
+    max-width: 280px;
+    transform: translateX(-100%);
+    z-index: 101;
+    transition: transform 0.25s ease;
+  }
+  .sidebar.mobile-open {
+    transform: translateX(0);
+  }
+  .sidebar.collapsed { width: 100% !important; }
+  .sidebar.collapsed .nav-label,
+  .sidebar.collapsed .logo-text,
+  .sidebar.collapsed .sidebar-exams { opacity: 1; pointer-events: auto; }
+  .sidebar.collapsed .sidebar-toggle { transform: rotate(0deg); }
+  .sidebar-toggle {
+    display: flex;
+  }
   .dashboard-grid { grid-template-columns: 1fr; }
   .form-row { flex-direction: column; }
+  .sidebar-header {
+    padding: 16px 12px;
+  }
+  .logo-text { font-size: 16px; }
+  .nav-btn { font-size: 13px; }
+  .sidebar-exams { max-height: 40vh; }
 }
 
 /* ======= UTILITIES ======= */

@@ -322,7 +322,51 @@ document.querySelectorAll('.nav-btn').forEach(btn=>{
     if(v==='calendario'){renderCalendar();}
   });
 });
-document.getElementById('sidebarToggle').addEventListener('click',()=>document.getElementById('sidebar').classList.toggle('collapsed'));
+// Toggle sidebar - different behavior on mobile vs desktop
+function isMobile() { return window.innerWidth <= 680; }
+function toggleSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+  if (isMobile()) {
+    // On mobile, toggle mobile-open class and overlay
+    sidebar.classList.toggle('mobile-open');
+    overlay.classList.toggle('active');
+  } else {
+    // On desktop, toggle collapsed class
+    sidebar.classList.toggle('collapsed');
+  }
+}
+document.getElementById('sidebarToggle').addEventListener('click', toggleSidebar);
+document.getElementById('mobileHamburger').addEventListener('click', toggleSidebar);
+if (document.getElementById('sidebarOverlay')) {
+  document.getElementById('sidebarOverlay').addEventListener('click', () => {
+    if (isMobile()) {
+      document.getElementById('sidebar').classList.remove('mobile-open');
+      document.getElementById('sidebarOverlay').classList.remove('active');
+    }
+  });
+}
+
+// Close sidebar on nav click (mobile)
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (isMobile()) {
+      document.getElementById('sidebar').classList.remove('mobile-open');
+      document.getElementById('sidebarOverlay').classList.remove('active');
+    }
+  });
+});
+
+// Handle window resize
+window.addEventListener('resize', () => {
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+  if (window.innerWidth > 680) {
+    // Return to desktop mode
+    sidebar.classList.remove('mobile-open');
+    overlay.classList.remove('active');
+  }
+});
 (()=>{
   const d=new Date();
   const days=['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
