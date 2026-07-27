@@ -958,6 +958,88 @@ input:focus, select:focus, textarea:focus {
   border-bottom: 1px solid var(--border);
 }
 
+.book-track-config {
+  background: var(--cream);
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 10px;
+}
+
+.track-checkboxes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.track-checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.track-checkbox-item input[type=checkbox] {
+  accent-color: var(--racing-red);
+  cursor: pointer;
+}
+
+.track-checkbox-item label {
+  cursor: pointer;
+  flex: 1;
+}
+
+.custom-track-input {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.custom-track-input input {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.custom-track-input input:focus {
+  outline: none;
+  border-color: var(--racing-red);
+  box-shadow: 0 0 0 2px rgba(255, 0, 34, 0.1);
+}
+
+.custom-tracks-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.custom-track-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--parchment);
+  padding: 6px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.custom-track-tag button {
+  background: none;
+  border: none;
+  color: var(--ink-light);
+  cursor: pointer;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.custom-track-tag button:hover {
+  color: var(--racing-red);
+}
+
 .color-picker {
   display: flex;
   gap: 8px;

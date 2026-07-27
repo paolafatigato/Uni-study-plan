@@ -484,16 +484,32 @@ function renderExamCard(e,idx,total){
       <div class="exam-notes-text">${e.notes.replace(/\n/g,'<br>')}</div>
     </div>` : '';
 
+  const trackConfig = getExamTrackConfig(e);
+  
   const booksHtml=(e.books||[]).map((b,bi)=>{
     const tp=b.totalPages||0,r=v=>tp?Math.round((v||0)/tp*100):0,tc=b.totalChapters||0;
+    
+    // Build track rows based on configuration
+    let trackRows = '';
+    trackConfig.forEach(track => {
+      if (track.type === 'predefined') {
+        if (track.field === 'pagesRead') {
+          trackRows += `<div class="book-track"><span class="book-track-label">${track.label}</span><div class="book-track-bar"><div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${r(b.pagesRead)}%;background:${e.color}88"></div></div></div><span class="text-mono" style="font-size:11px">${b.pagesRead||0}</span></div>`;
+        } else if (track.field === 'pagesUnderlined') {
+          trackRows += `<div class="book-track"><span class="book-track-label">${track.label}</span><div class="book-track-bar"><div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${r(b.pagesUnderlined)}%;background:${e.color}bb"></div></div></div><span class="text-mono" style="font-size:11px">${b.pagesUnderlined||0}</span></div>`;
+        } else if (track.field === 'pagesStudied') {
+          trackRows += `<div class="book-track"><span class="book-track-label">${track.label}</span><div class="book-track-bar"><div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${r(b.pagesStudied)}%;background:${e.color}"></div></div></div><span class="text-mono" style="font-size:11px">${b.pagesStudied||0}</span></div>`;
+        } else if (track.field === 'chapters' && tc) {
+          trackRows += `<div class="chapter-tracks mt-8"><div class="chapter-badge">📚 Letti <span class="chapter-count">${b.chaptersRead||0}/${tc}</span></div><div class="chapter-badge">🃏 Anki <span class="chapter-count">${b.chaptersAnki||0}/${tc}</span></div><div class="chapter-badge">✅ Studiati <span class="chapter-count">${b.chaptersStudied||0}/${tc}</span></div></div>`;
+        }
+      }
+    });
+    
     return `<div class="book-row">
       <div class="book-title-row"><span class="book-title">${b.title||'Libro senza titolo'}</span><span class="book-pages">${tp} pp · ${tc} cap</span></div>
       <div class="book-progress-tracks">
-        <div class="book-track"><span class="book-track-label">📖 Lette</span><div class="book-track-bar"><div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${r(b.pagesRead)}%;background:${e.color}88"></div></div></div><span class="text-mono" style="font-size:11px">${b.pagesRead||0}</span></div>
-        <div class="book-track"><span class="book-track-label">✏️ Sottolineate</span><div class="book-track-bar"><div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${r(b.pagesUnderlined)}%;background:${e.color}bb"></div></div></div><span class="text-mono" style="font-size:11px">${b.pagesUnderlined||0}</span></div>
-        <div class="book-track"><span class="book-track-label">🧠 Studiate</span><div class="book-track-bar"><div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${r(b.pagesStudied)}%;background:${e.color}"></div></div></div><span class="text-mono" style="font-size:11px">${b.pagesStudied||0}</span></div>
+        ${trackRows}
       </div>
-      ${tc?`<div class="chapter-tracks mt-8"><div class="chapter-badge">📚 Letti <span class="chapter-count">${b.chaptersRead||0}/${tc}</span></div><div class="chapter-badge">🃏 Anki <span class="chapter-count">${b.chaptersAnki||0}/${tc}</span></div><div class="chapter-badge">✅ Studiati <span class="chapter-count">${b.chaptersStudied||0}/${tc}</span></div></div>`:''}
       <button class="btn-ghost mt-8" style="font-size:12px;padding:5px 10px" onclick="event.stopPropagation();openProgressModal('${e.id}',${bi})">Aggiorna progresso</button>
     </div>`;
   }).join('');
@@ -545,6 +561,65 @@ document.getElementById('applyCustomColor').addEventListener('click',()=>addCust
 
 // ===== EXAM MODAL =====
 ['btnAddExam','btnAddExam2'].forEach(id=>document.getElementById(id)?.addEventListener('click',()=>openExamModal(null)));
+
+// ===== BOOK TRACK CONFIGURATION =====
+const DEFAULT_TRACK_CONFIG = [
+  { id: 'pages_read', label: '📖 Lette', icon: '📖', type: 'predefined', field: 'pagesRead' },
+  { id: 'pages_underlined', label: '✏️ Sottolineate', icon: '✏️', type: 'predefined', field: 'pagesUnderlined' },
+  { id: 'pages_studied', label: '🧠 Studiate', icon: '🧠', type: 'predefined', field: 'pagesStudied' },
+  { id: 'chapters', label: '📚 Capitoli', icon: '📚', type: 'predefined', field: 'chapters' },
+];
+
+function getExamTrackConfig(exam) {
+  if (!exam) return DEFAULT_TRACK_CONFIG.slice();
+  if (!exam.bookTrackConfig) return DEFAULT_TRACK_CONFIG.slice();
+  return exam.bookTrackConfig;
+}
+
+function renderBookTrackConfig(exam) {
+  const cbDiv = document.getElementById('bookTrackCheckboxes');
+  const customDiv = document.getElementById('customTracksList');
+  if (!cbDiv || !customDiv) return;
+  
+  const config = getExamTrackConfig(exam);
+  const custom = config.filter(c => c.type === 'custom');
+  
+  cbDiv.innerHTML = DEFAULT_TRACK_CONFIG.map(c => `
+    <div class="track-checkbox-item">
+      <input type="checkbox" id="track-${c.id}" class="book-track-cb" data-track-id="${c.id}" ${config.some(conf => conf.id === c.id) ? 'checked' : ''}>
+      <label for="track-${c.id}">${c.label}</label>
+    </div>
+  `).join('');
+  
+  customDiv.innerHTML = custom.map(c => `
+    <div class="custom-track-tag" data-custom-track-id="${c.id}">
+      <span>${c.label}</span>
+      <button type="button" onclick="removeCustomTrack('${c.id}')">✕</button>
+    </div>
+  `).join('');
+}
+
+function collectBookTrackConfig() {
+  const checked = [...document.querySelectorAll('.book-track-cb:checked')].map(cb => cb.dataset.trackId);
+  const predefined = DEFAULT_TRACK_CONFIG.filter(c => checked.includes(c.id));
+  
+  const customTags = document.querySelectorAll('.custom-track-tag');
+  const custom = Array.from(customTags).map(tag => ({
+    id: tag.dataset.customTrackId,
+    label: tag.querySelector('span').textContent,
+    icon: '🏷️',
+    type: 'custom',
+    field: null
+  }));
+  
+  return [...predefined, ...custom];
+}
+
+window.removeCustomTrack = function(trackId) {
+  const tag = document.querySelector(`.custom-track-tag[data-custom-track-id="${trackId}"]`);
+  if (tag) tag.remove();
+};
+
 window.openExamModal=function(examId){
   state.editingExamId=examId;
   const exam=examId?state.exams.find(e=>e.id===examId):null;
@@ -558,6 +633,25 @@ window.openExamModal=function(examId){
   const ac=document.getElementById('appellDates');
   renderAppellRows(ac,exam?(exam.appells||[]):[]);
   document.getElementById('addAppellBtn').onclick=()=>renderAppellRows(ac,[...collectAppells(),{date:'',chosen:false}]);
+
+  // Book track configuration
+  renderBookTrackConfig(exam);
+  document.getElementById('addCustomTrackBtn').onclick = () => {
+    const input = document.getElementById('customTrackInput');
+    const text = input.value.trim();
+    if (!text) return;
+    const customList = document.getElementById('customTracksList');
+    const trackId = 'custom_' + uid();
+    const tag = document.createElement('div');
+    tag.className = 'custom-track-tag';
+    tag.setAttribute('data-custom-track-id', trackId);
+    tag.innerHTML = `<span>${text}</span><button type="button" onclick="removeCustomTrack('${trackId}')">✕</button>`;
+    customList.appendChild(tag);
+    input.value = '';
+  };
+  document.getElementById('customTrackInput').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') document.getElementById('addCustomTrackBtn').click();
+  });
 
   const bc=document.getElementById('booksList');
   renderBookEntries(bc,exam?(exam.books||[]):[]);
@@ -639,6 +733,7 @@ document.getElementById('saveExamBtn').addEventListener('click',()=>{
     moodle:document.getElementById('examMoodle').value.trim(),
     notes:document.getElementById('examNotes').value.trim(),
     appells:collectAppells(),books:collectBooks(),
+    bookTrackConfig:collectBookTrackConfig(),
     hasSlides:document.getElementById('hasSlidesi').checked,
     slidesTotal:+document.getElementById('slidesTotal').value||0,
     slidesDone:+document.getElementById('slidesDone').value||0,
