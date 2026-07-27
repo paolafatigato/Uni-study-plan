@@ -543,12 +543,46 @@ function renderExamCard(e,idx,total){
 // ===== COLOR PICKER =====
 function renderColorPicker(cid, selected, colors){
   const el=document.getElementById(cid);
-  el.innerHTML=colors.map(c=>`<div class="color-swatch ${c===selected?'selected':''}" style="background:${c}" data-color="${c}" onclick="selectSwatch(this,'${cid}')"></div>`).join('');
-  el.dataset.selected=selected||colors[0];
+  const visibleCount = 6;
+  const visibleColors = colors.slice(0, visibleCount);
+  const hiddenColors = colors.slice(visibleCount);
+  
+  let html = '<div class="color-picker-visible">';
+  visibleColors.forEach(c => {
+    html += `<div class="color-swatch ${c===selected?'selected':''}" style="background:${c}" data-color="${c}" onclick="selectSwatch(this,'${cid}')"></div>`;
+  });
+  
+  if(hiddenColors.length > 0){
+    html += `<button type="button" class="color-picker-dropdown-btn" onclick="toggleColorDropdown('${cid}')">▼</button>`;
+    html += '<div class="color-picker-dropdown hidden" id="' + cid + '-dropdown">';
+    hiddenColors.forEach(c => {
+      html += `<div class="color-swatch ${c===selected?'selected':''}" style="background:${c}" data-color="${c}" onclick="selectSwatch(this,'${cid}')"></div>`;
+    });
+    html += '</div>';
+  }
+  html += '</div>';
+  
+  el.innerHTML = html;
+  el.dataset.selected = selected || colors[0];
 }
+window.toggleColorDropdown=function(cid){
+  const dropdown = document.getElementById(cid + '-dropdown');
+  const btn = dropdown?.previousElementSibling;
+  if(dropdown){
+    dropdown.classList.toggle('hidden');
+    if(btn) btn.classList.toggle('open');
+  }
+};
 window.selectSwatch=function(swatch,cid){
   document.querySelectorAll(`#${cid} .color-swatch`).forEach(s=>s.classList.remove('selected'));
-  swatch.classList.add('selected'); document.getElementById(cid).dataset.selected=swatch.dataset.color;
+  swatch.classList.add('selected'); 
+  document.getElementById(cid).dataset.selected=swatch.dataset.color;
+  const dropdown = document.getElementById(cid + '-dropdown');
+  if(dropdown && !dropdown.classList.contains('hidden')){
+    dropdown.classList.add('hidden');
+    const btn = dropdown.previousElementSibling;
+    if(btn) btn.classList.remove('open');
+  }
 };
 function addCustomSwatch(cid,hex){
   const el=document.getElementById(cid);

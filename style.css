@@ -1043,8 +1043,16 @@ input:focus, select:focus, textarea:focus {
 .color-picker {
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
+  align-items: center;
   padding: 6px 0;
+  flex-wrap: nowrap;
+  position: relative;
+}
+.color-picker-visible {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: nowrap;
 }
 .color-swatch {
   width: 28px; height: 28px;
@@ -1052,9 +1060,55 @@ input:focus, select:focus, textarea:focus {
   cursor: pointer;
   border: 3px solid transparent;
   transition: border-color 0.15s, transform 0.1s;
+  flex-shrink: 0;
 }
 .color-swatch:hover { transform: scale(1.15); }
 .color-swatch.selected { border-color: var(--ink); }
+
+.color-picker-dropdown-btn {
+  width: 32px;
+  height: 32px;
+  border: 1.5px solid var(--border);
+  border-radius: 6px;
+  background: var(--cream);
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+  position: relative;
+}
+.color-picker-dropdown-btn:hover {
+  background: var(--parchment);
+  border-color: var(--ink-light);
+}
+.color-picker-dropdown-btn.open {
+  background: var(--light-gold);
+  border-color: var(--ink);
+}
+
+.color-picker-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(28px, 1fr));
+  gap: 8px;
+  box-shadow: var(--shadow-md);
+  z-index: 50;
+  min-width: 180px;
+  max-width: 250px;
+}
+.color-picker-dropdown.hidden {
+  display: none;
+}
 
 .appell-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
 .appell-row {
