@@ -374,7 +374,7 @@ window.addEventListener('resize', () => {
   document.getElementById('headerDate').innerHTML=`<strong>${days[d.getDay()]}</strong><br>${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
 })();
 
-function renderAll(){ renderSidebarExams(); renderDashboard(); renderPlanningView(); }
+function renderAll(){ renderSidebarExams(); renderDashboard(); renderExamsGrid(); renderPlanningView(); }
 
 // ===== SIDEBAR =====
 function renderSidebarExams(){
