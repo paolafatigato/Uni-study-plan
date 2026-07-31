@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>StudyMap — Planner Universitario</title>
+  <link rel="icon" type="image/png" href="logo.png">
+  <link rel="manifest" href="manifest.json">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,500;0,9..40,700;1,9..40,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
@@ -34,8 +36,8 @@
     <button class="sidebar-toggle" id="sidebarToggle" title="Chiudi menu">‹</button>
   </div>
   <nav class="sidebar-nav">
-    <button class="nav-btn active" data-view="dashboard"><span class="nav-icon">🏠</span><span class="nav-label">Dashboard</span></button>
-    <button class="nav-btn" data-view="esami"><span class="nav-icon">🎓</span><span class="nav-label">Esami</span></button>
+    <button class="nav-btn" data-view="dashboard"><span class="nav-icon">🏠</span><span class="nav-label">Dashboard</span></button>
+    <button class="nav-btn active" data-view="esami"><span class="nav-icon">🎓</span><span class="nav-label">Esami</span></button>
     <button class="nav-btn" data-view="piani"><span class="nav-icon">�</span><span class="nav-label">Pianifica</span></button>
     <button class="nav-btn" data-view="calendario"><span class="nav-icon">📅</span><span class="nav-label">Calendario</span></button>
   </nav>
@@ -57,7 +59,7 @@
   <button class="mobile-hamburger" id="mobileHamburger" title="Apri menu">☰</button>
 
   <!-- DASHBOARD -->
-  <section class="view active" id="view-dashboard">
+  <section class="view" id="view-dashboard">
     <header class="page-header">
       <div><h1 id="dashGreeting">Ciao! 👋</h1><p class="subtitle">Ecco il tuo studio di oggi</p></div>
       <div class="header-date" id="headerDate"></div>
@@ -70,7 +72,7 @@
   </section>
 
   <!-- ESAMI -->
-  <section class="view" id="view-esami">
+  <section class="view active" id="view-esami">
     <header class="page-header">
       <div><h1>🎓 Esami</h1><p class="subtitle">Gestisci libri, slides, videolezioni e note</p></div>
       <button class="btn-primary" id="btnAddExam2">+ Nuovo esame</button>
