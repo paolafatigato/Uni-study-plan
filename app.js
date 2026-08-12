@@ -127,7 +127,10 @@ function blockDays(block) {
   let cur = new Date(block.startDate + 'T00:00:00');
   const end = new Date(block.endDate + 'T00:00:00');
   while (cur <= end) {
-    if (activeDows.includes(cur.getDay())) days.push(cur.toISOString().slice(0,10));
+    if (activeDows.includes(cur.getDay())) {
+      const ds = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-${String(cur.getDate()).padStart(2,'0')}`;
+      days.push(ds);
+    }
     cur.setDate(cur.getDate() + 1);
   }
   return days;
@@ -145,9 +148,10 @@ function autoPaceOnDate(block, item, dateStr, exam) {
   exam = exam || state.exams.find(e => e.id === block.examId);
   if (!exam) return null;
   const allDays = blockDays(block);
-  const idx = allDays.indexOf(dateStr);
-  if (idx === -1) return null;
-  const daysLeft = allDays.length - idx;
+  if (allDays.indexOf(dateStr) === -1) return null;
+  const t = today();
+  const fromIdx = allDays.findIndex(d => d >= t);
+  const daysLeft = fromIdx === -1 ? 1 : Math.max(1, allDays.length - fromIdx);
   let total, done, label, unit, icon;
   if (item.type === 'book') {
     const b = (exam.books || [])[item.bookIdx]; if (!b) return null;
@@ -203,12 +207,17 @@ function renderAutoItemRow(block, item, dateStr, dayData) {
     return `<div class="day-auto-row done"><span class="day-auto-icon">${pace.icon}</span><span class="day-auto-label">${pace.label}</span><span class="day-auto-donebadge">✓ finito</span></div>`;
   }
   const val = (logged != null) ? logged : '';
+  const checkedAsPlanned = logged != null && logged >= pace.perDay;
   return `<div class="day-auto-row${logged!=null?' logged':''}">
     <span class="day-auto-icon">${pace.icon}</span>
     <span class="day-auto-label">${pace.label}</span>
     <span class="day-auto-target">oggi <strong>${pace.perDay}</strong> ${pace.unit}</span>
-    <input type="number" min="0" class="day-auto-input" placeholder="${pace.perDay}" title="Quante/i ${pace.unit} hai fatto davvero oggi? (puoi segnare di più o di meno)"
-      data-blockid="${block.id}" data-type="${item.type}" data-bookidx="${item.bookIdx ?? ''}" value="${val}">
+    <div class="day-auto-controls">
+      <input type="checkbox" class="day-auto-check"${checkedAsPlanned?' checked':''} title="Fatto come previsto (${pace.perDay} ${pace.unit})"
+        data-blockid="${block.id}" data-type="${item.type}" data-bookidx="${item.bookIdx ?? ''}" data-perday="${pace.perDay}">
+      <input type="number" min="0" class="day-auto-input" placeholder="${pace.perDay}" title="Quante/i ${pace.unit} hai fatto davvero oggi? (puoi segnare di più o di meno)"
+        data-blockid="${block.id}" data-type="${item.type}" data-bookidx="${item.bookIdx ?? ''}" value="${val}">
+    </div>
   </div>`;
 }
 // Manual tasks (checkbox) + auto-calculated items (numeric log) for a block on a given date
@@ -242,6 +251,12 @@ function attachBlockDayListeners(container, dateStr) {
       state.calendar[dateStr].completions[cb.dataset.taskid]=cb.checked;
       cb.closest('label').classList.toggle('done',cb.checked);
       save();renderCalendar();renderDashboard();
+    });
+  });
+  container.querySelectorAll('.day-auto-check').forEach(cb=>{
+    cb.addEventListener('change',()=>{
+      const amount = cb.checked ? cb.dataset.perday : 0;
+      applyAutoLog(dateStr, cb.dataset.blockid, cb.dataset.type, cb.dataset.bookidx, amount);
     });
   });
   container.querySelectorAll('.day-auto-input').forEach(inp=>{

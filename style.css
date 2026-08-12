@@ -2025,31 +2025,53 @@ textarea { resize: vertical; min-height: 80px; }
 .block-material-pace strong { color: var(--racing-red); font-family: 'DM Mono', monospace; }
 
 /* ======= AUTO ITEMS — Dashboard & Calendar day panel ======= */
-.day-auto-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.day-auto-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; max-width: 100%; }
 .day-auto-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px 8px;
   padding: 8px 10px;
   background: #fff;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   font-size: 13px;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 .day-auto-row.logged { border-color: var(--sea-green); background: #f2f9f4; }
 .day-auto-row.done { opacity: 0.7; }
 .day-auto-icon { flex-shrink: 0; }
 .day-auto-label { font-weight: 600; color: var(--ink); flex-shrink: 0; }
-.day-auto-target { color: var(--ink-light); font-size: 12px; }
+.day-auto-target { color: var(--ink-light); font-size: 12px; flex: 1 1 auto; min-width: 0; }
 .day-auto-target strong { color: var(--racing-red); font-family: 'DM Mono', monospace; }
-.day-auto-input {
-  width: 60px;
+.day-auto-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
   margin-left: auto;
+}
+.day-auto-check {
+  accent-color: var(--sea-green);
+  width: 16px; height: 16px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.day-auto-input {
+  width: 52px;
+  box-sizing: border-box;
   text-align: center;
   font-family: 'DM Mono', monospace;
   font-size: 13px;
-  padding: 4px 6px;
+  padding: 4px 4px;
   border: 1px solid var(--border);
   border-radius: 6px;
+  -moz-appearance: textfield;
+}
+.day-auto-input::-webkit-outer-spin-button,
+.day-auto-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 .day-auto-donebadge { color: var(--sea-green); font-weight: 700; font-size: 12px; margin-left: auto; }
