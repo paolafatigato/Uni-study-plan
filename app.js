@@ -395,7 +395,7 @@ function renderAll(){ renderSidebarExams(); renderDashboard(); renderExamsGrid()
 function renderSidebarExams(){
   const el=document.getElementById('examList');
   if(!state.exams.length){el.innerHTML='<p style="font-size:12px;color:rgba(255,255,255,.3);padding:4px 8px;">Nessun esame ancora</p>';return;}
-  el.innerHTML=state.exams.map(e=>`<div class="exam-sidebar-item" onclick="goToExam('${e.id}')"><span class="exam-dot" style="background:${e.color}"></span><span>${e.name}</span></div>`).join('');
+  el.innerHTML=state.exams.map(e=>`<div class="exam-sidebar-item${e.completed?' completed':''}" onclick="goToExam('${e.id}')"><span class="exam-dot" style="background:${e.color}"></span><span>${e.name}</span></div>`).join('');
 }
 window.goToExam=function(id){
   document.querySelector('[data-view="esami"]').click();
@@ -541,6 +541,7 @@ function renderExamCard(e,idx,total){
         <button class="btn-icon" onclick="event.stopPropagation();moveExam('${e.id}',-1)" title="Sposta su"${idx===0?' disabled':''}>▲</button>
         <button class="btn-icon" onclick="event.stopPropagation();moveExam('${e.id}',1)" title="Sposta giù"${idx===total-1?' disabled':''}>▼</button>
         ${e.moodle?`<a class="exam-moodle" href="${e.moodle}" target="_blank" onclick="event.stopPropagation()">Moodle</a>`:''}
+        <button class="btn-icon${e.completed?' completed':''} " onclick="event.stopPropagation();completeExam('${e.id}')" title="${e.completed?'Esame completato':'Segnare come sostenuto'}">✅</button>
         <button class="btn-icon" onclick="event.stopPropagation();openExamModal('${e.id}')">✏️</button>
         <button class="btn-icon" onclick="event.stopPropagation();deleteExam('${e.id}')">🗑️</button>
       </div>
@@ -777,6 +778,7 @@ document.getElementById('saveExamBtn').addEventListener('click',()=>{
   const name=document.getElementById('examName').value.trim();
   if(!name){alert('Inserisci il nome!');return;}
   const color=document.getElementById('colorPicker').dataset.selected||PRESET_COLORS[0];
+  const existingExam=state.editingExamId?state.exams.find(e=>e.id===state.editingExamId):null;
   const exam={
     id:state.editingExamId||uid(),name,color,
     moodle:document.getElementById('examMoodle').value.trim(),
@@ -789,11 +791,28 @@ document.getElementById('saveExamBtn').addEventListener('click',()=>{
     hasVideo:document.getElementById('hasVideo').checked,
     videoTotal:+document.getElementById('videoTotal').value||0,
     videoDone:+document.getElementById('videoDone').value||0,
+    completed:existingExam?.completed||false,
   };
   if(state.editingExamId){const i=state.exams.findIndex(e=>e.id===state.editingExamId);if(i>=0)state.exams[i]=exam;}
   else state.exams.push(exam);
   save(); closeModal('examModal'); renderSidebarExams(); renderExamsGrid(); renderDashboard();
 });
+window.completeExam=function(id){
+  const idx=state.exams.findIndex(e=>e.id===id); if(idx<0)return;
+  state.exams[idx].completed=!state.exams[idx].completed;
+  if(state.exams[idx].completed){
+    // Sposta in fondo se marcato come completato
+    const [item]=state.exams.splice(idx,1);
+    state.exams.push(item);
+  } else {
+    // Se de-marcato, riporta all'inizio dei non-completati
+    const [item]=state.exams.splice(idx,1);
+    const firstCompletedIdx=state.exams.findIndex(e=>e.completed);
+    if(firstCompletedIdx===-1) state.exams.push(item);
+    else state.exams.splice(firstCompletedIdx,0,item);
+  }
+  save(); renderSidebarExams(); renderExamsGrid(); renderDashboard();
+};
 window.deleteExam=function(id){
   if(!confirm('Eliminare questo esame?'))return;
   state.exams=state.exams.filter(e=>e.id!==id);

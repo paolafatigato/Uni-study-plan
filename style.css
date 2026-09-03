@@ -189,6 +189,8 @@ body {
 
 .exam-sidebar-item:hover { background: rgba(255,255,255,0.08); color: #fff; }
 
+.exam-sidebar-item.completed { opacity: 0.5; text-decoration: line-through; }
+
 .exam-dot {
   width: 10px; height: 10px;
   border-radius: 50%;
@@ -342,6 +344,7 @@ body {
   color: var(--ink-light);
 }
 .btn-icon:hover { background: var(--parchment); color: var(--ink); }
+.btn-icon.completed { color: #2e7d32; font-weight: bold; }
 
 /* ======= DASHBOARD ======= */
 .dashboard-grid {
