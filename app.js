@@ -33,7 +33,9 @@ const PRESET_COLORS = [
 ];
 
 // ===== STATE =====
-// studyBlock shape: { id, label, color, examId|null, startDate, endDate, activeWeekdays:[0-6], tasks:[{id,text}], autoItems:[{type:'book'|'slides'|'video',bookIdx}] }
+// studyBlock shape: { id, label, color, examIds:[], startDate, endDate, activeWeekdays:[0-6], tasks:[{id,text}], autoItems:[{type:'book'|'slides'|'video',examId,bookIdx}] }
+// autoItems sharing the same unit (pp/slides/min) are pooled together into ONE combined daily target,
+// even across different exams — the person then logs actual amounts per individual material.
 let state = {
   exams: [], studyBlocks: [], calendar: {},
   calMonth: new Date().getMonth(), calYear: new Date().getFullYear(),
@@ -55,6 +57,7 @@ async function loadFromFirestore(uid) {
       state.exams       = d.exams       || [];
       state.studyBlocks = d.studyBlocks || [];
       state.calendar    = d.calendar    || {};
+      migrateBlocks();
     }
     hideSync();
   } catch(e) { showSync('Errore caricamento','error'); console.error(e); }
@@ -114,6 +117,17 @@ function today(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getM
 function daysUntil(ds){ if(!ds)return null; return Math.ceil((new Date(ds+'T00:00:00')-new Date(today()+'T00:00:00'))/86400000); }
 
 // ===== BLOCK HELPERS =====
+// One-time upgrade of old blocks (single examId, autoItems without their own examId)
+// to the new multi-exam shape. Safe to run repeatedly.
+function migrateBlocks() {
+  state.studyBlocks.forEach(b => {
+    if (!b.examIds) b.examIds = b.examId ? [b.examId] : [];
+    if (b.autoItems) {
+      b.autoItems = b.autoItems.map(it => it.examId ? it : { ...it, examId: b.examId || b.examIds[0] || null });
+    }
+  });
+}
+function blockExamIds(block) { return block.examIds || (block.examId ? [block.examId] : []); }
 // Weekdays a block is active on. Falls back to legacy excludeWeekends flag for old blocks.
 function blockActiveWeekdays(block) {
   if (block.activeWeekdays && block.activeWeekdays.length) return block.activeWeekdays;
@@ -142,39 +156,46 @@ function blocksForDate(dateStr) {
     return blockActiveWeekdays(b).includes(dow);
   });
 }
-// Pace of a single tracked material of a block, computed live for a given date
-// (remaining ÷ study-days left in the block from that date onward)
-function autoPaceOnDate(block, item, dateStr, exam) {
-  exam = exam || state.exams.find(e => e.id === block.examId);
-  if (!exam) return null;
+// Remaining/total for a single tracked material, wherever its exam is (used to build pools)
+function itemRemaining(item) {
+  const exam = state.exams.find(e => e.id === item.examId); if (!exam) return null;
+  if (item.type === 'book') {
+    const b = (exam.books || [])[item.bookIdx]; if (!b) return null;
+    return { total:b.totalPages||0, done:b.pagesRead||0, label:b.title||`Libro ${item.bookIdx+1}`, unit:'pp', icon:'📖', examName:exam.name, examColor:exam.color };
+  } else if (item.type === 'slides') {
+    return { total:exam.slidesTotal||0, done:exam.slidesDone||0, label:'Slides', unit:'slides', icon:'🖥️', examName:exam.name, examColor:exam.color };
+  } else if (item.type === 'video') {
+    return { total:exam.videoTotal||0, done:exam.videoDone||0, label:'Video', unit:'min', icon:'🎬', examName:exam.name, examColor:exam.color };
+  }
+  return null;
+}
+function unitLabel(u){ return u==='pp'?'Pagine':u==='slides'?'Slides':u==='min'?'Video':u; }
+function unitIcon(u){ return u==='pp'?'📖':u==='slides'?'🖥️':u==='min'?'🎬':''; }
+// Combined pace of a POOL of materials (possibly from different exams) sharing the same unit,
+// computed live for a given date: (sum of what's left across all of them) ÷ study-days left.
+// Finished materials drop out of the pool automatically.
+function poolPaceOnDate(block, items, dateStr) {
   const allDays = blockDays(block);
   if (allDays.indexOf(dateStr) === -1) return null;
   const t = today();
   const fromIdx = allDays.findIndex(d => d >= t);
   const daysLeft = fromIdx === -1 ? 1 : Math.max(1, allDays.length - fromIdx);
-  let total, done, label, unit, icon;
-  if (item.type === 'book') {
-    const b = (exam.books || [])[item.bookIdx]; if (!b) return null;
-    total = b.totalPages || 0; done = b.pagesRead || 0; label = b.title || `Libro ${item.bookIdx+1}`; unit = 'pp'; icon = '📖';
-  } else if (item.type === 'slides') {
-    total = exam.slidesTotal || 0; done = exam.slidesDone || 0; label = 'Slides'; unit = 'slides'; icon = '🖥️';
-  } else if (item.type === 'video') {
-    total = exam.videoTotal || 0; done = exam.videoDone || 0; label = 'Video'; unit = 'min'; icon = '🎬';
-  } else return null;
-  const remaining = Math.max(0, total - done);
-  if (remaining <= 0) return { done:true, label, icon, unit, total, doneSoFar:done };
-  const perDay = Math.ceil(remaining / daysLeft);
-  return { done:false, perDay, remaining, daysLeft, label, unit, icon, total, doneSoFar:done };
+  const enriched = items.map(it => ({ item: it, info: itemRemaining(it) })).filter(g => g.info);
+  const active = enriched.filter(g => (g.info.total - g.info.done) > 0);
+  if (!active.length) return { done:true };
+  const totalRemaining = active.reduce((s,g)=>s+Math.max(0,g.info.total-g.info.done),0);
+  const perDay = Math.ceil(totalRemaining / daysLeft);
+  return { done:false, perDay, totalRemaining, daysLeft, active };
 }
-function autoItemKey(block, item) { return `${block.id}|${item.type}|${item.bookIdx ?? 'x'}`; }
-// Log the actual amount done for a tracked material on a given date; updates the exam's
-// real counters incrementally (delta-based) so switching the number up/down stays consistent.
-window.applyAutoLog = function(dateStr, blockId, type, bookIdxRaw, newAmountRaw) {
+function autoItemKey(block, item) { return `${block.id}|${item.examId}|${item.type}|${item.bookIdx ?? 'x'}`; }
+// Log the actual amount done for ONE material on a given date; updates that material's exam
+// counters incrementally (delta-based) so switching the number up/down stays consistent.
+window.applyAutoLog = function(dateStr, blockId, examId, type, bookIdxRaw, newAmountRaw) {
   const block = state.studyBlocks.find(b => b.id === blockId); if (!block) return;
-  const exam = state.exams.find(e => e.id === block.examId); if (!exam) return;
+  const exam = state.exams.find(e => e.id === examId); if (!exam) return;
   const bookIdx = (bookIdxRaw === '' || bookIdxRaw == null) ? null : +bookIdxRaw;
   const newAmount = Math.max(0, Math.round(+newAmountRaw || 0));
-  const key = `${block.id}|${type}|${bookIdx ?? 'x'}`;
+  const key = `${block.id}|${examId}|${type}|${bookIdx ?? 'x'}`;
   if (!state.calendar[dateStr]) state.calendar[dateStr] = {};
   if (!state.calendar[dateStr].autoLog) state.calendar[dateStr].autoLog = {};
   const prevApplied = state.calendar[dateStr].autoLog[key] || 0;
@@ -196,28 +217,36 @@ window.applyAutoLog = function(dateStr, blockId, type, bookIdxRaw, newAmountRaw)
   }
   if (document.getElementById('view-esami')?.classList.contains('active')) renderExamsGrid();
 };
-// Renders a single tracked-material row (icon, label, live target, editable input) for a given date
-function renderAutoItemRow(block, item, dateStr, dayData) {
-  const exam = state.exams.find(e => e.id === block.examId);
-  const pace = autoPaceOnDate(block, item, dateStr, exam);
+// Renders one POOL (all materials sharing a unit, e.g. all "pp" from every selected exam) as a
+// single combined target, with one editable input per material so amounts can be split freely.
+function renderAutoPoolRow(block, unit, items, dateStr, dayData) {
+  const pace = poolPaceOnDate(block, items, dateStr);
   if (!pace) return '';
-  const key = autoItemKey(block, item);
-  const logged = dayData.autoLog?.[key];
+  const poolKey = `${block.id}|${unit}`;
   if (pace.done) {
-    return `<div class="day-auto-row done"><span class="day-auto-icon">${pace.icon}</span><span class="day-auto-label">${pace.label}</span><span class="day-auto-donebadge">✓ finito</span></div>`;
+    return `<div class="day-auto-row done"><span class="day-auto-icon">${unitIcon(unit)}</span><span class="day-auto-label">${unitLabel(unit)}</span><span class="day-auto-donebadge">✓ finito</span></div>`;
   }
-  const val = (logged != null) ? logged : '';
-  const checkedAsPlanned = logged != null && logged >= pace.perDay;
-  return `<div class="day-auto-row${logged!=null?' logged':''}">
-    <span class="day-auto-icon">${pace.icon}</span>
-    <span class="day-auto-label">${pace.label}</span>
-    <span class="day-auto-target">oggi <strong>${pace.perDay}</strong> ${pace.unit}</span>
-    <div class="day-auto-controls">
-      <input type="checkbox" class="day-auto-check"${checkedAsPlanned?' checked':''} title="Fatto come previsto (${pace.perDay} ${pace.unit})"
-        data-blockid="${block.id}" data-type="${item.type}" data-bookidx="${item.bookIdx ?? ''}" data-perday="${pace.perDay}">
-      <input type="number" min="0" class="day-auto-input" placeholder="${pace.perDay}" title="Quante/i ${pace.unit} hai fatto davvero oggi? (puoi segnare di più o di meno)"
-        data-blockid="${block.id}" data-type="${item.type}" data-bookidx="${item.bookIdx ?? ''}" value="${val}">
+  let sum = 0;
+  const rows = pace.active.map(({item,info})=>{
+    const key = autoItemKey(block, item);
+    const logged = dayData.autoLog?.[key];
+    if (logged != null) sum += (+logged || 0);
+    const val = (logged != null) ? logged : '';
+    return `<div class="day-auto-pool-item">
+      <span class="day-auto-pool-item-label" style="color:${info.examColor}">${info.label}<small> · ${info.examName}</small></span>
+      <input type="number" min="0" class="day-auto-pool-input" placeholder="0" title="Quante/i ${unit} hai fatto da qui oggi?"
+        data-poolkey="${poolKey}" data-blockid="${block.id}" data-examid="${item.examId}" data-type="${item.type}" data-bookidx="${item.bookIdx ?? ''}" value="${val}">
+    </div>`;
+  }).join('');
+  const singleItem = pace.active.length === 1;
+  return `<div class="day-auto-pool">
+    <div class="day-auto-pool-header">
+      <span class="day-auto-icon">${unitIcon(unit)}</span>
+      <span class="day-auto-label">${unitLabel(unit)}${pace.active.length>1?` <small>(${pace.active.length} fonti)</small>`:''}</span>
+      <span class="day-auto-target">oggi <strong>${pace.perDay}</strong> ${unit} <span class="day-auto-pool-sum" data-poolkey="${poolKey}">· inserite: ${sum}</span></span>
+      ${singleItem?`<button type="button" class="day-auto-pool-fillbtn" title="Segna ${pace.perDay} ${unit} come fatto" data-poolkey="${poolKey}" data-target="${pace.perDay}">✓</button>`:''}
     </div>
+    <div class="day-auto-pool-items">${rows}</div>
   </div>`;
 }
 // Manual tasks (checkbox) + auto-calculated items (numeric log) for a block on a given date
@@ -235,7 +264,9 @@ function renderBlockDayContent(block, dateStr, dayData) {
     }).join('')}</div>`;
   }
   if (autoItems.length) {
-    html += `<div class="day-auto-list">${autoItems.map(it=>renderAutoItemRow(block,it,dateStr,dayData)).join('')}</div>`;
+    const groups = {};
+    autoItems.forEach(it => { const info = itemRemaining(it); if (!info) return; (groups[info.unit] = groups[info.unit] || []).push(it); });
+    html += `<div class="day-auto-list">${Object.keys(groups).map(unit=>renderAutoPoolRow(block,unit,groups[unit],dateStr,dayData)).join('')}</div>`;
   }
   if (!tasks.length && !autoItems.length) {
     html += '<p style="font-size:12px;color:var(--ink-light);margin:4px 0">Nessuna attività in questo blocco</p>';
@@ -253,18 +284,28 @@ function attachBlockDayListeners(container, dateStr) {
       save();renderCalendar();renderDashboard();
     });
   });
-  container.querySelectorAll('.day-auto-check').forEach(cb=>{
-    cb.addEventListener('change',()=>{
-      const amount = cb.checked ? cb.dataset.perday : 0;
-      applyAutoLog(dateStr, cb.dataset.blockid, cb.dataset.type, cb.dataset.bookidx, amount);
-    });
-  });
-  container.querySelectorAll('.day-auto-input').forEach(inp=>{
+  container.querySelectorAll('.day-auto-pool-input').forEach(inp=>{
+    inp.addEventListener('input',()=>updatePoolSumDisplay(container, inp.dataset.poolkey));
     inp.addEventListener('change',()=>{
       if(inp.value==='')return;
-      applyAutoLog(dateStr, inp.dataset.blockid, inp.dataset.type, inp.dataset.bookidx, inp.value);
+      applyAutoLog(dateStr, inp.dataset.blockid, inp.dataset.examid, inp.dataset.type, inp.dataset.bookidx, inp.value);
     });
   });
+  container.querySelectorAll('.day-auto-pool-fillbtn').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const input = container.querySelector(`.day-auto-pool-input[data-poolkey="${btn.dataset.poolkey}"]`);
+      if(!input)return;
+      input.value = btn.dataset.target;
+      applyAutoLog(dateStr, input.dataset.blockid, input.dataset.examid, input.dataset.type, input.dataset.bookidx, input.value);
+    });
+  });
+}
+// Live-updates the "inserite: N" total next to a pool's target as the person types, before saving
+function updatePoolSumDisplay(container, poolKey) {
+  const inputs = container.querySelectorAll(`.day-auto-pool-input[data-poolkey="${poolKey}"]`);
+  let sum = 0; inputs.forEach(i=>sum += (+i.value || 0));
+  const sumEl = container.querySelector(`.day-auto-pool-sum[data-poolkey="${poolKey}"]`);
+  if (sumEl) sumEl.textContent = `· inserite: ${sum}`;
 }
 // Reference date used to show a block's "at a glance" pace on its card (today if within range, else next/last study day)
 function blockReferenceDate(block) {
@@ -322,6 +363,16 @@ function examMaterials(exam) {
   if (exam.hasVideo && exam.videoTotal)   items.push({ type:'video',  bookIdx:null, label:'Video',  icon:'🎬', unit:'min',    total:exam.videoTotal,  done:exam.videoDone||0 });
   return items;
 }
+// Same, but across several exams at once — each material tagged with its own examId/name/color
+function materialsForExams(examIds) {
+  const items = [];
+  (examIds || []).forEach(examId => {
+    const exam = state.exams.find(e => e.id === examId); if (!exam) return;
+    examMaterials(exam).forEach(m => items.push({ ...m, examId, examName:exam.name, examColor:exam.color }));
+  });
+  return items;
+}
+function matKey(m) { return `${m.examId}|${m.type}|${m.bookIdx ?? 'x'}`; }
 
 // ===== NAVIGATION =====
 document.querySelectorAll('.nav-btn').forEach(btn=>{
@@ -866,24 +917,29 @@ function renderPlanningView(){
     return;
   }
   el.innerHTML=state.studyBlocks.map(block=>{
-    const exam=block.examId?state.exams.find(e=>e.id===block.examId):null;
+    const examIds=blockExamIds(block);
+    const exams=examIds.map(id=>state.exams.find(e=>e.id===id)).filter(Boolean);
     const days=blockDays(block).length;
     const wdLabels=['Dom','Lun','Mar','Mer','Gio','Ven','Sab'];
     const activeDows=blockActiveWeekdays(block);
     const wdSummary=activeDows.length===7?'':' · '+(activeDows.length===5&&!activeDows.includes(0)&&!activeDows.includes(6)?'solo feriali':activeDows.slice().sort().map(d=>wdLabels[d]).join('/'));
     const refDate=blockReferenceDate(block);
-    const autoHtml=(block.autoItems||[]).map(it=>{
-      if(!refDate||!exam)return'';
-      const pace=autoPaceOnDate(block,it,refDate,exam);
-      if(!pace)return'';
-      return pace.done?`<span class="pace-chip">✓ ${pace.label} finito</span>`:`<span class="pace-chip"><strong>${pace.perDay} ${pace.unit}/g</strong> ${pace.label}</span>`;
-    }).join('');
+    let autoHtml='';
+    if(refDate&&(block.autoItems||[]).length){
+      const groups={};
+      block.autoItems.forEach(it=>{ const info=itemRemaining(it); if(!info)return; (groups[info.unit]=groups[info.unit]||[]).push(it); });
+      autoHtml=Object.keys(groups).map(unit=>{
+        const pace=poolPaceOnDate(block,groups[unit],refDate);
+        if(!pace)return'';
+        return pace.done?`<span class="pace-chip">✓ ${unitLabel(unit)} finite</span>`:`<span class="pace-chip"><strong>${pace.perDay} ${unit}/g</strong> ${unitLabel(unit)}${groups[unit].length>1?` <small>(${groups[unit].length} fonti)</small>`:''}</span>`;
+      }).join('');
+    }
     return `<div class="block-card" style="border-left:4px solid ${block.color}">
       <div class="block-card-header">
         <div>
           <div class="block-card-title">${block.label}</div>
           <div class="block-card-meta">📅 ${fmtShort(block.startDate)} → ${fmtShort(block.endDate)} · <strong>${days} giorn${days===1?'o':'i'}</strong>${wdSummary}</div>
-          ${exam?`<div class="block-card-exam" style="color:${exam.color}">🎓 ${exam.name}</div>`:''}
+          ${exams.length?`<div class="block-card-exam">🎓 ${exams.map(e=>`<span style="color:${e.color}">${e.name}</span>`).join(' · ')}</div>`:''}
         </div>
         <div style="display:flex;gap:4px;flex-shrink:0">
           <button class="btn-icon" onclick="openBlockModal('${block.id}')">✏️</button>
@@ -966,10 +1022,27 @@ function renderSimResults(){
 }
 
 // ===== BLOCK MODAL =====
-function renderBlockExamSelect(selectedId){
-  const sel=document.getElementById('blockExam'); if(!sel)return;
-  sel.innerHTML='<option value="">— nessuno —</option>'+
-    state.exams.map(e=>`<option value="${e.id}"${e.id===selectedId?' selected':''}>${e.name}</option>`).join('');
+// Multi-select exam picker (chips) — a block can now pool materials from several exams at once
+function renderBlockExamPicker(selectedIds){
+  const picker=document.getElementById('blockExamPicker'); if(!picker)return;
+  if(!state.exams.length){ picker.innerHTML='<p style="font-size:12px;color:var(--ink-light)">Nessun esame creato ancora.</p>'; return; }
+  picker.innerHTML=state.exams.map(e=>{
+    const active=selectedIds.includes(e.id);
+    return `<button type="button" class="exam-chip${active?' active':''}" data-examid="${e.id}" style="${active?`background:${e.color};border-color:${e.color}`:''}">${e.name}</button>`;
+  }).join('');
+  picker.querySelectorAll('.exam-chip').forEach(chip=>{
+    chip.onclick=()=>{
+      const nowActive=!chip.classList.contains('active');
+      chip.classList.toggle('active',nowActive);
+      const exam=state.exams.find(ex=>ex.id===chip.dataset.examid);
+      chip.style.background=nowActive&&exam?exam.color:'';
+      chip.style.borderColor=nowActive&&exam?exam.color:'';
+      renderBlockMaterialsSection();
+    };
+  });
+}
+function getSelectedExamIdsFromUI(){
+  return [...document.querySelectorAll('#blockExamPicker .exam-chip.active')].map(c=>c.dataset.examid);
 }
 function renderBlockTaskEntries(container,tasks){
   container.innerHTML=tasks.map(t=>`<div class="block-task-entry">
@@ -1004,19 +1077,20 @@ document.getElementById('wdPresetWeekdays')?.addEventListener('click',()=>{
   updateBlockDaysPreview();
 });
 
-// --- Auto-calculated materials picker ---
-let editingBlockAutoItemsTemp=null; // saved selection when editing a block; null = new block (default: all checked)
+// --- Auto-calculated materials picker (now spans every selected exam, pooled by unit) ---
+// Tracks materials the person explicitly UNchecked during this modal session (default = all checked),
+// so toggling exams on/off never loses the checks already made on the others.
+let editingBlockUncheckedTemp=new Set();
 function renderBlockMaterialsSection(){
-  const examId=document.getElementById('blockExam')?.value;
-  const exam=examId?state.exams.find(e=>e.id===examId):null;
+  const examIds=getSelectedExamIdsFromUI();
   const section=document.getElementById('blockMaterialsSection');
   const list=document.getElementById('blockMaterialsList');
   if(!section||!list)return;
-  if(!exam){ section.classList.add('hidden'); list.innerHTML=''; return; }
-  const materials=examMaterials(exam);
+  if(!examIds.length){ section.classList.add('hidden'); list.innerHTML=''; return; }
+  const materials=materialsForExams(examIds);
   section.classList.remove('hidden');
   if(!materials.length){
-    list.innerHTML=`<p style="font-size:12px;color:var(--ink-light)">Aggiungi pagine totali, slides o video a "${exam.name}" per attivare il calcolo automatico.</p>`;
+    list.innerHTML=`<p style="font-size:12px;color:var(--ink-light)">Aggiungi pagine totali, slides o video agli esami selezionati per attivare il calcolo automatico.</p>`;
     return;
   }
   const start=document.getElementById('blockStart').value, end=document.getElementById('blockEnd').value;
@@ -1026,23 +1100,36 @@ function renderBlockMaterialsSection(){
     let cur=new Date(start+'T00:00:00'),endDate=new Date(end+'T00:00:00');
     while(cur<=endDate){ if(activeDows.includes(cur.getDay()))nDays++; cur.setDate(cur.getDate()+1); }
   }
-  list.innerHTML=materials.map(m=>{
-    const checked = editingBlockAutoItemsTemp!==null
-      ? editingBlockAutoItemsTemp.some(s=>s.type===m.type&&(s.bookIdx??null)===(m.bookIdx??null))
-      : true;
-    const remaining=Math.max(0,m.total-m.done);
-    const perDay=nDays>0?Math.ceil(remaining/nDays):null;
-    return `<label class="block-material-row${checked?' checked':''}">
-      <input type="checkbox" class="block-material-cb" data-type="${m.type}" data-bookidx="${m.bookIdx??''}" ${checked?'checked':''} onchange="this.closest('label').classList.toggle('checked',this.checked)">
-      <span class="block-material-icon">${m.icon}</span>
-      <span class="block-material-label">${m.label}</span>
-      <span class="block-material-pace">${remaining} ${m.unit} rimaste${perDay!=null?` → <strong>${perDay} ${m.unit}/g</strong>`:''}</span>
-    </label>`;
+  const groups={};
+  materials.forEach(m=>{ (groups[m.unit]=groups[m.unit]||[]).push(m); });
+  list.innerHTML=Object.keys(groups).map(unit=>{
+    const items=groups[unit];
+    const checkedItems=items.filter(m=>!editingBlockUncheckedTemp.has(matKey(m)));
+    const totalRemaining=checkedItems.reduce((s,m)=>s+Math.max(0,m.total-m.done),0);
+    const perDay=(nDays>0&&checkedItems.length)?Math.ceil(totalRemaining/nDays):null;
+    return `<div class="block-material-group">
+      <div class="block-material-group-header">${unitIcon(unit)} <strong>${unitLabel(unit)}</strong>${perDay!=null?` <span class="block-material-pace">— <strong>${perDay} ${unit}/g</strong> combinat${unit==='pp'?'e':'i'} (${totalRemaining} rimaste in totale)</span>`:''}</div>
+      ${items.map(m=>{
+        const checked=!editingBlockUncheckedTemp.has(matKey(m));
+        const remaining=Math.max(0,m.total-m.done);
+        return `<label class="block-material-row${checked?' checked':''}">
+          <input type="checkbox" class="block-material-cb" data-examid="${m.examId}" data-type="${m.type}" data-bookidx="${m.bookIdx??''}" ${checked?'checked':''} onchange="toggleBlockMaterial(this)">
+          <span class="block-material-icon">${m.icon}</span>
+          <span class="block-material-label">${m.label} <small style="color:${m.examColor};font-weight:600">· ${m.examName}</small></span>
+          <span class="block-material-pace">${remaining} ${m.unit} rimaste</span>
+        </label>`;
+      }).join('')}
+    </div>`;
   }).join('');
 }
+window.toggleBlockMaterial=function(cb){
+  const key=`${cb.dataset.examid}|${cb.dataset.type}|${cb.dataset.bookidx||'x'}`;
+  if(cb.checked) editingBlockUncheckedTemp.delete(key); else editingBlockUncheckedTemp.add(key);
+  renderBlockMaterialsSection();
+};
 function collectBlockAutoItems(){
   return [...document.querySelectorAll('.block-material-cb:checked')].map(cb=>({
-    type:cb.dataset.type, bookIdx: cb.dataset.bookidx===''?null:+cb.dataset.bookidx
+    examId:cb.dataset.examid, type:cb.dataset.type, bookIdx: cb.dataset.bookidx===''?null:+cb.dataset.bookidx
   }));
 }
 
@@ -1066,14 +1153,20 @@ window.openBlockModal=function(blockId){
   document.getElementById('blockLabel').value=block?.label||'';
   document.getElementById('blockStart').value=block?.startDate||'';
   document.getElementById('blockEnd').value=block?.endDate||'';
-  renderBlockExamSelect(block?.examId||'');
-  document.getElementById('blockExam').onchange=()=>{ editingBlockAutoItemsTemp = null; renderBlockMaterialsSection(); };
+  const examIds=block?blockExamIds(block):[];
+  renderBlockExamPicker(examIds);
   const tc=document.getElementById('blockTasksList');
   renderBlockTaskEntries(tc,block?.tasks?.length?block.tasks:[{text:''}]);
   document.getElementById('addBlockTaskBtn').onclick=()=>renderBlockTaskEntries(tc,[...collectBlockTasks(),{text:''}]);
 
   initWeekdayPicker(block?blockActiveWeekdays(block):[1,2,3,4,5,6,0]);
-  editingBlockAutoItemsTemp = block ? (block.autoItems||[]) : null;
+
+  // Rebuild the "unchecked" set from what was actually saved (everything else defaults to checked)
+  editingBlockUncheckedTemp=new Set();
+  if(block){
+    const savedKeys=new Set((block.autoItems||[]).map(matKey));
+    materialsForExams(examIds).forEach(m=>{ if(!savedKeys.has(matKey(m))) editingBlockUncheckedTemp.add(matKey(m)); });
+  }
 
   updateBlockDaysPreview();
   openModal('blockModal');
@@ -1086,14 +1179,14 @@ document.getElementById('saveBlockBtn').addEventListener('click',()=>{
   if(endDate<startDate){alert('La data di fine deve essere dopo quella di inizio!');return;}
   const activeWeekdays=getSelectedWeekdaysFromUI();
   if(!activeWeekdays.length){alert('Seleziona almeno un giorno della settimana!');return;}
-  const examId=document.getElementById('blockExam').value||null;
-  const exam=examId?state.exams.find(e=>e.id===examId):null;
+  const examIds=getSelectedExamIdsFromUI();
+  const firstExam=examIds[0]?state.exams.find(e=>e.id===examIds[0]):null;
   const tasks=collectBlockTasks();
   const autoItems=collectBlockAutoItems();
   const block={
     id:state.editingBlockId||uid(),
     label:label||`Blocco ${fmtShort(startDate)}–${fmtShort(endDate)}`,
-    examId,color:exam?.color||'#3548c0',
+    examIds,color:firstExam?.color||'#3548c0',
     startDate,endDate,
     activeWeekdays,
     tasks, autoItems,

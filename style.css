@@ -2006,9 +2006,29 @@ textarea { resize: vertical; min-height: 80px; }
 .wd-chip:hover { border-color: var(--racing-red); }
 .wd-chip.active { background: var(--racing-red); border-color: var(--racing-red); color: #fff; }
 .wd-presets { display: flex; gap: 8px; margin-top: 8px; }
-
+/* ======= EXAM PICKER (block modal — multi-select chips) ======= */
+.block-exam-picker { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.exam-chip {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--ink-mid);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.exam-chip:hover { border-color: var(--racing-red); }
+.exam-chip.active { color: #fff; }
 /* ======= AUTO-CALCULATED MATERIALS (block modal) ======= */
 .block-materials-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.block-material-group { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; margin-bottom: 8px; }
+.block-material-group-header { font-size: 13px; margin-bottom: 8px; }
+.block-material-group-header strong { color: var(--ink); }
+.block-material-group .block-material-row { border: none; padding: 6px 4px; opacity: 0.45; }
+.block-material-group .block-material-row.checked { opacity: 1; }
 .block-material-row {
   display: flex;
   align-items: center;
@@ -2078,3 +2098,46 @@ textarea { resize: vertical; min-height: 80px; }
   margin: 0;
 }
 .day-auto-donebadge { color: var(--sea-green); font-weight: 700; font-size: 12px; margin-left: auto; }
+/* ======= POOLED AUTO ITEMS (day panel — combined target, split across materials/exams) ======= */
+.day-auto-pool {
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  box-sizing: border-box;
+}
+.day-auto-pool-header { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+.day-auto-pool-header .day-auto-label small { color: var(--ink-light); font-weight: 500; }
+.day-auto-pool-sum { color: var(--ink-light); font-weight: 500; }
+.day-auto-pool-fillbtn {
+  margin-left: auto;
+  border: 1px solid var(--sea-green);
+  color: var(--sea-green);
+  background: none;
+  border-radius: 6px;
+  width: 24px; height: 24px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.day-auto-pool-fillbtn:hover { background: var(--sea-green); color: #fff; }
+.day-auto-pool-items { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.day-auto-pool-item { display: flex; align-items: center; gap: 8px; }
+.day-auto-pool-item-label { flex: 1 1 auto; min-width: 0; color: var(--ink); }
+.day-auto-pool-item-label small { color: var(--ink-light); font-weight: 500; }
+.day-auto-pool-input {
+  width: 52px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  text-align: center;
+  font-family: 'DM Mono', monospace;
+  font-size: 13px;
+  padding: 4px 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  -moz-appearance: textfield;
+}
+.day-auto-pool-input::-webkit-outer-spin-button,
+.day-auto-pool-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
