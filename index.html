@@ -174,16 +174,7 @@
       <div id="appellDates" class="appell-list"></div>
       <button class="btn-ghost" id="addAppellBtn">+ Aggiungi appello</button>
 
-      <div class="form-section-title">⚙️ Configurazione barre per i libri</div>
-      <div class="book-track-config">
-        <p style="font-size:13px;color:var(--ink-light);margin-bottom:12px">Scegli quali metriche tracciare per i libri:</p>
-        <div id="bookTrackCheckboxes" class="track-checkboxes"></div>
-        <div class="custom-track-input">
-          <input type="text" id="customTrackInput" placeholder="es. Riassunto, Flashcard..." style="flex:1">
-          <button class="btn-ghost" id="addCustomTrackBtn" style="font-size:12px;padding:6px 12px">+ Aggiungi</button>
-        </div>
-        <div id="customTracksList" class="custom-tracks-list"></div>
-      </div>
+
 
       <div class="form-section-title">📚 Libri</div>
       <div id="booksList" class="books-list"></div>
@@ -282,7 +273,28 @@
     </div>
   </div>
 </div>
-
+<!-- Modal: Configurazione tracciamento libro -->
+<div class="modal-overlay" id="bookTrackModal">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <h2>⚙️ Metriche del libro</h2>
+      <button class="modal-close" data-close="bookTrackModal">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px;color:var(--ink-light);margin-bottom:12px">Scegli quali metriche tracciare per questo libro:</p>
+      <div id="bookTrackModalCheckboxes" class="track-checkboxes"></div>
+      <div class="custom-track-input">
+        <input type="text" id="bookTrackModalCustomInput" placeholder="es. Riassunto, Flashcard..." style="flex:1">
+        <button class="btn-ghost" id="bookTrackModalAddCustomBtn" style="font-size:12px;padding:6px 12px">+ Aggiungi</button>
+      </div>
+      <div id="bookTrackModalCustomList" class="custom-tracks-list"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" data-close="bookTrackModal">Annulla</button>
+      <button class="btn-primary" id="bookTrackModalSaveBtn">Salva</button>
+    </div>
+  </div>
+</div>
 <div id="syncIndicator" class="sync-indicator hidden">
   <span class="sync-dot"></span><span id="syncMsg">Salvataggio...</span>
 </div>

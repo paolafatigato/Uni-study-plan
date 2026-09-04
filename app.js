@@ -550,11 +550,10 @@ function renderExamCard(e,idx,total){
       <div class="exam-notes-text">${e.notes.replace(/\n/g,'<br>')}</div>
     </div>` : '';
 
-  const trackConfig = getExamTrackConfig(e);
-  
   const booksHtml=(e.books||[]).map((b,bi)=>{
     const tp=b.totalPages||0,r=v=>tp?Math.round((v||0)/tp*100):0,tc=b.totalChapters||0;
-    
+    const trackConfig = getBookTrackConfig(b, e); // configurazione specifica di questo libro
+
     // Build track rows based on configuration
     let trackRows = '';
     trackConfig.forEach(track => {
@@ -663,13 +662,84 @@ document.getElementById('applyCustomColor').addEventListener('click',()=>addCust
 // ===== EXAM MODAL =====
 ['btnAddExam','btnAddExam2'].forEach(id=>document.getElementById(id)?.addEventListener('click',()=>openExamModal(null)));
 
-// ===== BOOK TRACK CONFIGURATION =====
+// ===== BOOK TRACK CONFIGURATION (per libro) =====
 const DEFAULT_TRACK_CONFIG = [
   { id: 'pages_read', label: '📖 Lette', icon: '📖', type: 'predefined', field: 'pagesRead' },
   { id: 'pages_underlined', label: '✏️ Sottolineate', icon: '✏️', type: 'predefined', field: 'pagesUnderlined' },
   { id: 'pages_studied', label: '🧠 Studiate', icon: '🧠', type: 'predefined', field: 'pagesStudied' },
   { id: 'chapters', label: '📚 Capitoli', icon: '📚', type: 'predefined', field: 'chapters' },
 ];
+
+// Config di un libro: usa quella propria del libro, altrimenti (migrazione da esami vecchi)
+// quella salvata a livello di esame, altrimenti quella di default.
+function getBookTrackConfig(book, exam) {
+  if (book && book.trackConfig) return book.trackConfig;
+  if (exam && exam.bookTrackConfig) return exam.bookTrackConfig;
+  return DEFAULT_TRACK_CONFIG.slice();
+}
+
+// Mostra/nasconde nel form i campi non presenti nella config del libro
+function applyBookFieldVisibility(entryEl, config) {
+  const ids = new Set((config || []).map(c => c.id));
+  entryEl.querySelectorAll('.b-track-field').forEach(field => {
+    field.classList.toggle('hidden', !ids.has(field.dataset.trackId));
+  });
+}
+
+let editingBookEntryEl = null;
+
+window.openBookTrackModal = function(entryEl) {
+  editingBookEntryEl = entryEl;
+  const config = JSON.parse(entryEl.dataset.trackConfig || '[]');
+
+  document.getElementById('bookTrackModalCheckboxes').innerHTML = DEFAULT_TRACK_CONFIG.map(c => `
+    <div class="track-checkbox-item">
+      <input type="checkbox" id="bmtrack-${c.id}" class="book-track-modal-cb" data-track-id="${c.id}" ${config.some(conf => conf.id === c.id) ? 'checked' : ''}>
+      <label for="bmtrack-${c.id}">${c.label}</label>
+    </div>
+  `).join('');
+
+  const custom = config.filter(c => c.type === 'custom');
+  document.getElementById('bookTrackModalCustomList').innerHTML = custom.map(c => `
+    <div class="custom-track-tag" data-custom-track-id="${c.id}">
+      <span>${c.label}</span>
+      <button type="button" onclick="this.closest('.custom-track-tag').remove()">✕</button>
+    </div>
+  `).join('');
+
+  openModal('bookTrackModal');
+};
+
+document.getElementById('bookTrackModalAddCustomBtn').addEventListener('click', () => {
+  const input = document.getElementById('bookTrackModalCustomInput');
+  const text = input.value.trim();
+  if (!text) return;
+  const customList = document.getElementById('bookTrackModalCustomList');
+  const trackId = 'custom_' + uid();
+  const tag = document.createElement('div');
+  tag.className = 'custom-track-tag';
+  tag.setAttribute('data-custom-track-id', trackId);
+  tag.innerHTML = `<span>${text}</span><button type="button" onclick="this.closest('.custom-track-tag').remove()">✕</button>`;
+  customList.appendChild(tag);
+  input.value = '';
+});
+document.getElementById('bookTrackModalCustomInput').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); document.getElementById('bookTrackModalAddCustomBtn').click(); }
+});
+
+document.getElementById('bookTrackModalSaveBtn').addEventListener('click', () => {
+  if (!editingBookEntryEl) return;
+  const checked = [...document.querySelectorAll('.book-track-modal-cb:checked')].map(cb => cb.dataset.trackId);
+  const predefined = DEFAULT_TRACK_CONFIG.filter(c => checked.includes(c.id));
+  const custom = [...document.querySelectorAll('#bookTrackModalCustomList .custom-track-tag')].map(tag => ({
+    id: tag.dataset.customTrackId, label: tag.querySelector('span').textContent, icon: '🏷️', type: 'custom', field: null
+  }));
+  const config = [...predefined, ...custom];
+  editingBookEntryEl.dataset.trackConfig = JSON.stringify(config);
+  applyBookFieldVisibility(editingBookEntryEl, config);
+  editingBookEntryEl = null;
+  closeModal('bookTrackModal');
+});
 
 function getExamTrackConfig(exam) {
   if (!exam) return DEFAULT_TRACK_CONFIG.slice();
@@ -735,28 +805,9 @@ window.openExamModal=function(examId){
   renderAppellRows(ac,exam?(exam.appells||[]):[]);
   document.getElementById('addAppellBtn').onclick=()=>renderAppellRows(ac,[...collectAppells(),{date:'',chosen:false}]);
 
-  // Book track configuration
-  renderBookTrackConfig(exam);
-  document.getElementById('addCustomTrackBtn').onclick = () => {
-    const input = document.getElementById('customTrackInput');
-    const text = input.value.trim();
-    if (!text) return;
-    const customList = document.getElementById('customTracksList');
-    const trackId = 'custom_' + uid();
-    const tag = document.createElement('div');
-    tag.className = 'custom-track-tag';
-    tag.setAttribute('data-custom-track-id', trackId);
-    tag.innerHTML = `<span>${text}</span><button type="button" onclick="removeCustomTrack('${trackId}')">✕</button>`;
-    customList.appendChild(tag);
-    input.value = '';
-  };
-  document.getElementById('customTrackInput').addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') document.getElementById('addCustomTrackBtn').click();
-  });
-
   const bc=document.getElementById('booksList');
-  renderBookEntries(bc,exam?(exam.books||[]):[]);
-  document.getElementById('addBookBtn').onclick=()=>renderBookEntries(bc,[...collectBooks(),{title:'',totalPages:0,totalChapters:0}]);
+  renderBookEntries(bc,exam?(exam.books||[]):[],exam);
+  document.getElementById('addBookBtn').onclick=()=>renderBookEntries(bc,[...collectBooks(),{title:'',totalPages:0,totalChapters:0}],exam);
 
   const hasSl=document.getElementById('hasSlidesi'),slD=document.getElementById('slidesDetail');
   hasSl.checked=!!(exam&&exam.hasSlides); slD.classList.toggle('hidden',!hasSl.checked);
@@ -789,27 +840,39 @@ function collectAppells(){
     date:row.querySelector('.appell-date').value, chosen:row.querySelector('.appell-chosen-check').checked,
   }));
 }
-function renderBookEntries(container,books){
+function renderBookEntries(container,books,exam){
   container.innerHTML=books.map((b,i)=>`<div class="book-entry">
-    <div class="book-entry-header"><strong>Libro ${i+1}</strong><button class="btn-icon" onclick="this.closest('.book-entry').remove()">✕</button></div>
+    <div class="book-entry-header">
+      <strong>Libro ${i+1}</strong>
+      <div class="book-entry-header-actions">
+        <button class="btn-icon" title="Configura metriche" onclick="event.stopPropagation();openBookTrackModal(this.closest('.book-entry'))">⚙️</button>
+        <button class="btn-icon" onclick="this.closest('.book-entry').remove()">✕</button>
+      </div>
+    </div>
     <div class="form-row"><div class="form-group"><label>Titolo</label><input type="text" class="b-title" value="${b.title||''}"></div></div>
     <div class="form-row">
       <div class="form-group"><label>Pagine totali</label><input type="number" class="b-totalpages" value="${b.totalPages||''}"></div>
-      <div class="form-group"><label>Pagine lette</label><input type="number" class="b-pagesread" value="${b.pagesRead||''}"></div>
+      <div class="form-group b-track-field" data-track-id="pages_read"><label>Pagine lette</label><input type="number" class="b-pagesread" value="${b.pagesRead||''}"></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Pag. sottolineate</label><input type="number" class="b-pagesunderlined" value="${b.pagesUnderlined||''}"></div>
-      <div class="form-group"><label>Pag. studiate</label><input type="number" class="b-pagesstudied" value="${b.pagesStudied||''}"></div>
+      <div class="form-group b-track-field" data-track-id="pages_underlined"><label>Pag. sottolineate</label><input type="number" class="b-pagesunderlined" value="${b.pagesUnderlined||''}"></div>
+      <div class="form-group b-track-field" data-track-id="pages_studied"><label>Pag. studiate</label><input type="number" class="b-pagesstudied" value="${b.pagesStudied||''}"></div>
     </div>
-    <div class="form-row">
+    <div class="form-row b-track-field" data-track-id="chapters">
       <div class="form-group"><label>Capitoli totali</label><input type="number" class="b-totalchapters" value="${b.totalChapters||''}"></div>
       <div class="form-group"><label>Cap. letti</label><input type="number" class="b-chaptersread" value="${b.chaptersRead||''}"></div>
     </div>
-    <div class="form-row">
+    <div class="form-row b-track-field" data-track-id="chapters">
       <div class="form-group"><label>Cap. Anki</label><input type="number" class="b-chaptersanki" value="${b.chaptersAnki||''}"></div>
       <div class="form-group"><label>Cap. studiati</label><input type="number" class="b-chaptersstudied" value="${b.chaptersStudied||''}"></div>
     </div>
   </div>`).join('');
+
+  [...container.querySelectorAll('.book-entry')].forEach((entryEl,i)=>{
+    const config=getBookTrackConfig(books[i],exam);
+    entryEl.dataset.trackConfig=JSON.stringify(config);
+    applyBookFieldVisibility(entryEl,config);
+  });
 }
 function collectBooks(){
   return [...document.getElementById('booksList').querySelectorAll('.book-entry')].map(e=>({
@@ -822,6 +885,7 @@ function collectBooks(){
     chaptersRead:+e.querySelector('.b-chaptersread').value||0,
     chaptersAnki:+e.querySelector('.b-chaptersanki').value||0,
     chaptersStudied:+e.querySelector('.b-chaptersstudied').value||0,
+    trackConfig:JSON.parse(e.dataset.trackConfig||'[]'),
   }));
 }
 
@@ -835,7 +899,6 @@ document.getElementById('saveExamBtn').addEventListener('click',()=>{
     moodle:document.getElementById('examMoodle').value.trim(),
     notes:document.getElementById('examNotes').value.trim(),
     appells:collectAppells(),books:collectBooks(),
-    bookTrackConfig:collectBookTrackConfig(),
     hasSlides:document.getElementById('hasSlidesi').checked,
     slidesTotal:+document.getElementById('slidesTotal').value||0,
     slidesDone:+document.getElementById('slidesDone').value||0,
@@ -873,23 +936,25 @@ window.deleteExam=function(id){
 // ===== PROGRESS MODAL =====
 window.openProgressModal=function(examId,bookIdx){
   const exam=state.exams.find(e=>e.id===examId), book=exam.books[bookIdx];
+  const trackConfig=getBookTrackConfig(book,exam);
+  const has=id=>trackConfig.some(c=>c.id===id);
   document.getElementById('progressModalTitle').textContent=`📖 ${book.title||'Libro'}`;
   document.getElementById('progressModalBody').innerHTML=`
-    <div class="form-group"><label>Pagine lette</label><input type="number" id="pm-pagesread" value="${book.pagesRead||0}"></div>
-    <div class="form-group"><label>Pagine sottolineate</label><input type="number" id="pm-pagesunderlined" value="${book.pagesUnderlined||0}"></div>
-    <div class="form-group"><label>Pagine studiate</label><input type="number" id="pm-pagesstudied" value="${book.pagesStudied||0}"></div>
-    ${book.totalChapters?`
+    ${has('pages_read')?`<div class="form-group"><label>Pagine lette</label><input type="number" id="pm-pagesread" value="${book.pagesRead||0}"></div>`:''}
+    ${has('pages_underlined')?`<div class="form-group"><label>Pagine sottolineate</label><input type="number" id="pm-pagesunderlined" value="${book.pagesUnderlined||0}"></div>`:''}
+    ${has('pages_studied')?`<div class="form-group"><label>Pagine studiate</label><input type="number" id="pm-pagesstudied" value="${book.pagesStudied||0}"></div>`:''}
+    ${(has('chapters')&&book.totalChapters)?`
     <div class="form-group"><label>Capitoli letti</label><input type="number" id="pm-chapread" value="${book.chaptersRead||0}"></div>
     <div class="form-group"><label>Capitoli Anki</label><input type="number" id="pm-chapanki" value="${book.chaptersAnki||0}"></div>
     <div class="form-group"><label>Capitoli studiati</label><input type="number" id="pm-chapstudied" value="${book.chaptersStudied||0}"></div>`:''}`;
   document.getElementById('saveProgressBtn').onclick=()=>{
-    book.pagesRead=+document.getElementById('pm-pagesread').value||0;
-    book.pagesUnderlined=+document.getElementById('pm-pagesunderlined').value||0;
-    book.pagesStudied=+document.getElementById('pm-pagesstudied').value||0;
-    if(book.totalChapters){
-      book.chaptersRead=+document.getElementById('pm-chapread').value||0;
-      book.chaptersAnki=+document.getElementById('pm-chapanki').value||0;
-      book.chaptersStudied=+document.getElementById('pm-chapstudied').value||0;
+    if(has('pages_read')) book.pagesRead=+document.getElementById('pm-pagesread')?.value||0;
+    if(has('pages_underlined')) book.pagesUnderlined=+document.getElementById('pm-pagesunderlined')?.value||0;
+    if(has('pages_studied')) book.pagesStudied=+document.getElementById('pm-pagesstudied')?.value||0;
+    if(has('chapters')&&book.totalChapters){
+      book.chaptersRead=+document.getElementById('pm-chapread')?.value||0;
+      book.chaptersAnki=+document.getElementById('pm-chapanki')?.value||0;
+      book.chaptersStudied=+document.getElementById('pm-chapstudied')?.value||0;
     }
     save(); closeModal('progressModal'); renderExamsGrid(); renderDashboard();
   };
