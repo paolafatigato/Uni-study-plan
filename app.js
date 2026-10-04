@@ -283,7 +283,7 @@ window.applyAutoLog = function(dateStr, blockId, examId, type, bookIdxRaw, newAm
   logProgress(examId, type, bookIdx, after - before, dateStr);
   state.calendar[dateStr].autoLog[key] = newAmount;
   save();
-  renderTodayGoals();
+  renderBlocksGrid();
   if (document.getElementById('view-calendario')?.classList.contains('active')) {
     renderCalendar();
     if (state.selectedDay) renderDayPanel(state.selectedDay);
@@ -357,7 +357,7 @@ function attachBlockDayListeners(container, dateStr) {
       if(!state.calendar[dateStr].completions)state.calendar[dateStr].completions={};
       state.calendar[dateStr].completions[cb.dataset.taskid]=cb.checked;
       cb.closest('label').classList.toggle('done',cb.checked);
-      save();renderCalendar();renderTodayGoals();
+      save();renderCalendar();renderBlocksGrid();
       if(state.selectedDay===dateStr) renderDayPanel(dateStr);
     });
   });
@@ -522,45 +522,38 @@ window.goToExam=function(id){
   setTimeout(()=>document.getElementById('exam-card-'+id)?.scrollIntoView({behavior:'smooth',block:'start'}),100);
 };
 
-// ===== OBIETTIVI DI OGGI (Pianifica) =====
-// For every block active today: pages/slides/minutes done today (logged from Esami or Calendar)
-// against the block's daily target, split across any of its sources.
-function renderTodayGoals(){
-  const el=document.getElementById('todayGoals'); if(!el)return;
+// ===== OGGI, DENTRO LA CARD DEL BLOCCO (Pianifica) =====
+// Pages/slides/minutes done today (logged from Esami or Calendar) against the block's daily target,
+// split across any of its sources. Returns '' when the block isn't active today.
+function blockTodayHtml(block){
   const t=today();
-  const todayBlocks=blocksForDate(t);
-  if(!todayBlocks.length){
-    el.innerHTML='<p style="color:var(--ink-light);font-size:13px;padding:4px 0">Nessun blocco di studio attivo oggi. Goditi la pausa! ☕</p>';
-    return;
-  }
-  el.innerHTML=todayBlocks.map(block=>{
-    const st=blockDayStatus(block,t);
-    const poolsHtml=st.paces.map(({unit,pace})=>{
-      if(pace.done) return `<div class="goal-pool"><div class="goal-pool-head"><span>${unitIcon(unit)} <strong>${unitLabel(unit)}</strong></span><span class="goal-status met">✓ Tutto finito!</span></div></div>`;
-      const pct=Math.min(100,Math.round(pace.doneOnDay/pace.perDay*100));
-      const status=poolStatusMessage(pace,unit);
-      const sources=pace.active.filter(g=>g.doneOnDay>0)
-        .map(g=>`<span class="goal-source" style="border-color:${g.info.examColor}">${g.info.label} <strong>+${g.doneOnDay}</strong></span>`).join('');
-      return `<div class="goal-pool">
-        <div class="goal-pool-head">
-          <span>${unitIcon(unit)} <strong>${unitLabel(unit)}</strong>${pace.active.length>1?` <small>(${pace.active.length} fonti)</small>`:''}</span>
-          <span class="goal-count"><strong>${pace.doneOnDay}</strong> / ${pace.perDay} ${unit}</span>
-        </div>
-        <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${pct}%;background:${pace.met?'var(--sea-green)':block.color}"></div></div>
-        <div class="goal-status ${status.cls}">${status.text}</div>
-        ${sources?`<div class="goal-sources">${sources}</div>`:''}
-      </div>`;
-    }).join('');
-    const tasksHtml=st.tasksTotal?`<div class="goal-tasks${st.tasksDone===st.tasksTotal?' met':''}">✔️ Attività spuntate: <strong>${st.tasksDone}/${st.tasksTotal}</strong> <small>(dal Calendario)</small></div>`:'';
-    return `<div class="goal-block${st.complete?' complete':''}" style="border-left:4px solid ${block.color}">
-      <div class="goal-block-head">
-        <span class="goal-block-name">${block.label}</span>
-        ${st.complete?'<span class="goal-block-badge">✅ Obiettivo di oggi raggiunto!</span>':''}
+  if(!blocksForDate(t).includes(block)) return '';
+  const st=blockDayStatus(block,t);
+  if(!st.hasGoals) return '';
+  const poolsHtml=st.paces.map(({unit,pace})=>{
+    if(pace.done) return `<div class="goal-pool"><div class="goal-pool-head"><span>${unitIcon(unit)} <strong>${unitLabel(unit)}</strong></span><span class="goal-status met">✓ Tutto finito!</span></div></div>`;
+    const pct=Math.min(100,Math.round(pace.doneOnDay/pace.perDay*100));
+    const status=poolStatusMessage(pace,unit);
+    const sources=pace.active.filter(g=>g.doneOnDay>0)
+      .map(g=>`<span class="goal-source" style="border-color:${g.info.examColor}">${g.info.label} <strong>+${g.doneOnDay}</strong></span>`).join('');
+    return `<div class="goal-pool">
+      <div class="goal-pool-head">
+        <span>${unitIcon(unit)} <strong>${unitLabel(unit)}</strong>${pace.active.length>1?` <small>(${pace.active.length} fonti)</small>`:''}</span>
+        <span class="goal-count"><strong>${pace.doneOnDay}</strong> / ${pace.perDay} ${unit}</span>
       </div>
-      ${poolsHtml}${tasksHtml}
-      ${!st.hasGoals?'<p style="font-size:12px;color:var(--ink-light)">Nessun obiettivo in questo blocco.</p>':''}
+      <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${pct}%;background:${pace.met?'var(--sea-green)':block.color}"></div></div>
+      <div class="goal-status ${status.cls}">${status.text}</div>
+      ${sources?`<div class="goal-sources">${sources}</div>`:''}
     </div>`;
   }).join('');
+  const tasksHtml=st.tasksTotal?`<div class="goal-tasks${st.tasksDone===st.tasksTotal?' met':''}">✔️ Attività spuntate: <strong>${st.tasksDone}/${st.tasksTotal}</strong> <small>(dal Calendario)</small></div>`:'';
+  return `<div class="block-today${st.complete?' complete':''}">
+    <div class="goal-block-head">
+      <span class="block-today-title">Oggi</span>
+      ${st.complete?'<span class="goal-block-badge">✅ Obiettivo di oggi raggiunto!</span>':''}
+    </div>
+    ${poolsHtml}${tasksHtml}
+  </div>`;
 }
 
 // ===== EXAMS GRID =====
@@ -574,7 +567,7 @@ window.moveExam=function(id,dir){
   const newIdx=idx+dir; if(newIdx<0||newIdx>=state.exams.length)return;
   const [item]=state.exams.splice(idx,1);
   state.exams.splice(newIdx,0,item);
-  save(); renderSidebarExams(); renderExamsGrid(); renderTodayGoals();
+  save(); renderSidebarExams(); renderExamsGrid(); renderBlocksGrid();
 };
 
 function renderExamCard(e,idx,total){
@@ -949,7 +942,7 @@ document.getElementById('saveExamBtn').addEventListener('click',()=>{
   }
   if(state.editingExamId){const i=state.exams.findIndex(e=>e.id===state.editingExamId);if(i>=0)state.exams[i]=exam;}
   else state.exams.push(exam);
-  save(); closeModal('examModal'); renderSidebarExams(); renderExamsGrid(); renderTodayGoals();
+  save(); closeModal('examModal'); renderSidebarExams(); renderExamsGrid(); renderBlocksGrid();
 });
 window.completeExam=function(id){
   const idx=state.exams.findIndex(e=>e.id===id); if(idx<0)return;
@@ -965,12 +958,12 @@ window.completeExam=function(id){
     if(firstCompletedIdx===-1) state.exams.push(item);
     else state.exams.splice(firstCompletedIdx,0,item);
   }
-  save(); renderSidebarExams(); renderExamsGrid(); renderTodayGoals();
+  save(); renderSidebarExams(); renderExamsGrid(); renderBlocksGrid();
 };
 window.deleteExam=function(id){
   if(!confirm('Eliminare questo esame?'))return;
   state.exams=state.exams.filter(e=>e.id!==id);
-  save(); renderSidebarExams(); renderExamsGrid(); renderTodayGoals();
+  save(); renderSidebarExams(); renderExamsGrid(); renderBlocksGrid();
 };
 
 // ===== INLINE PAGE NUMBER EDIT =====
@@ -990,7 +983,7 @@ window.editTrackNumber=function(el,examId,bookIdx,field){
       if(book.totalPages) v=Math.min(v,book.totalPages);
       if(BOOK_PAGE_FIELDS.includes(field)) logProgress(examId,'book',bookIdx,v-(book[field]||0),today(),field);
       book[field]=v;
-      save(); renderTodayGoals();
+      save(); renderBlocksGrid();
     }
     renderExamsGrid();
   };
@@ -1048,7 +1041,7 @@ window.openProgressModal=function(examId,bookIdx){
       book.chaptersAnki=+document.getElementById('pm-chapanki')?.value||0;
       book.chaptersStudied=+document.getElementById('pm-chapstudied')?.value||0;
     }
-    save(); closeModal('progressModal'); renderExamsGrid(); renderTodayGoals();
+    save(); closeModal('progressModal'); renderExamsGrid(); renderBlocksGrid();
   };
   openModal('progressModal');
 };
@@ -1068,7 +1061,9 @@ function renderPlanningView(){
     state.exams.map(e=>`<option value="${e.id}"${e.id===cur?' selected':''}>${e.name}</option>`).join('');
   simSel.onchange=()=>renderSimResults();
   renderSimRows(); renderSimResults();
-  renderTodayGoals();
+  renderBlocksGrid();
+}
+function renderBlocksGrid(){
   const el=document.getElementById('blocksGrid'); if(!el)return;
   if(!state.studyBlocks.length){
     el.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><div class="empty-state-icon">📋</div><p>Nessun blocco ancora.</p><button class="btn-primary" style="margin-top:12px" onclick="openBlockModal(null)">+ Crea il primo blocco</button></div>`;
@@ -1082,8 +1077,10 @@ function renderPlanningView(){
     const activeDows=blockActiveWeekdays(block);
     const wdSummary=activeDows.length===7?'':' · '+(activeDows.length===5&&!activeDows.includes(0)&&!activeDows.includes(6)?'solo feriali':activeDows.slice().sort().map(d=>wdLabels[d]).join('/'));
     const refDate=blockReferenceDate(block);
+    // Active today → the "Oggi" bar already shows the daily target, so the pace chips are skipped
+    const todayHtml=blockTodayHtml(block);
     let autoHtml='';
-    if(refDate&&(block.autoItems||[]).length){
+    if(!todayHtml&&refDate&&(block.autoItems||[]).length){
       const groups=blockPools(block);
       autoHtml=Object.keys(groups).map(unit=>{
         const pace=poolPaceOnDate(block,groups[unit],refDate);
@@ -1104,8 +1101,9 @@ function renderPlanningView(){
         </div>
       </div>
       ${autoHtml?`<div class="exam-pace-items" style="margin-bottom:8px">${autoHtml}</div>`:''}
+      ${todayHtml}
       ${block.tasks.length?`<ul class="block-card-tasks">${block.tasks.map(t=>`<li>${t.text}</li>`).join('')}</ul>`:''}
-      ${(!block.tasks.length&&!autoHtml)?'<p style="color:var(--ink-light);font-size:12px;padding:4px 0">Nessuna attività</p>':''}
+      ${(!block.tasks.length&&!autoHtml&&!todayHtml)?'<p style="color:var(--ink-light);font-size:12px;padding:4px 0">Nessuna attività</p>':''}
     </div>`;
   }).join('');
 }

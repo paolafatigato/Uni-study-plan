@@ -72,13 +72,14 @@
       <button class="btn-primary" id="btnAddBlock" onclick="openBlockModal(null)">+ Nuovo blocco</button>
     </header>
 
-    <!-- Today's goals -->
-    <div class="sim-section today-goals-section">
-      <div class="sim-section-header">
-        <h3>✅ Obiettivi di oggi</h3>
-        <p class="sim-section-sub">Calcolato dalle pagine che inserisci oggi in <strong>Esami</strong> (o dal Calendario), divise come vuoi tra le fonti del blocco</p>
+    <!-- Study blocks -->
+    <div class="blocks-section">
+      <div class="blocks-section-header">
+        <h3 class="blocks-title">📋 Blocchi di Studio</h3>
+        <button class="btn-ghost" onclick="openBlockModal(null)">+ Nuovo blocco</button>
       </div>
-      <div id="todayGoals"></div>
+      <p class="blocks-hint">Ogni blocco ha un intervallo di date e un elenco di attività da fare ogni giorno. Le pagine che inserisci oggi in <strong>Esami</strong> (o dal Calendario) riempiono la barra di oggi, divise come vuoi tra le fonti del blocco.</p>
+      <div id="blocksGrid" class="blocks-grid"></div>
     </div>
 
     <!-- Scenario simulator -->
@@ -96,16 +97,6 @@
         <button class="btn-ghost" onclick="addSimRow('date')">+ Fino a data</button>
       </div>
       <div id="simResultsArea"></div>
-    </div>
-
-    <!-- Study blocks -->
-    <div class="blocks-section">
-      <div class="blocks-section-header">
-        <h3 class="blocks-title">📋 Blocchi di Studio</h3>
-        <button class="btn-ghost" onclick="openBlockModal(null)">+ Nuovo blocco</button>
-      </div>
-      <p class="blocks-hint">Ogni blocco ha un intervallo di date e un elenco di attività da fare ogni giorno. Spunta le attività direttamente dal Calendario!</p>
-      <div id="blocksGrid" class="blocks-grid"></div>
     </div>
   </section>
 

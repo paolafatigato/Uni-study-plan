@@ -1784,7 +1784,7 @@ textarea { resize: vertical; min-height: 80px; }
 
 .blocks-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr));
   gap: 16px;
 }
 
@@ -2081,20 +2081,21 @@ textarea { resize: vertical; min-height: 80px; }
 }
 .day-auto-pool-input::-webkit-outer-spin-button,
 .day-auto-pool-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-/* ======= OBIETTIVI DI OGGI (Pianifica) ======= */
-.today-goals-section #todayGoals { display: flex; flex-direction: column; gap: 12px; }
-.goal-block {
+/* ======= OGGI — dentro la card del blocco (Pianifica) ======= */
+.blocks-section { margin-bottom: 28px; }
+.block-today {
   background: var(--ivory);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 14px 16px;
+  padding: 12px 14px;
+  margin: 4px 0 10px;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
-.goal-block.complete { background: #f2f9f4; border-color: var(--sea-green); }
+.block-today.complete { background: #f2f9f4; border-color: var(--sea-green); }
+.block-today-title { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-light); }
 .goal-block-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
-.goal-block-name { font-weight: 700; font-size: 15px; color: var(--ink); }
 .goal-block-badge {
   background: var(--sea-green);
   color: #fff;
