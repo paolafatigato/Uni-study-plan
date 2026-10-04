@@ -556,14 +556,12 @@ function renderExamCard(e,idx,total){
 
     // Build track rows based on configuration
     let trackRows = '';
+    const pageAlpha = { pagesRead:'88', pagesUnderlined:'bb', pagesStudied:'' };
     trackConfig.forEach(track => {
       if (track.type === 'predefined') {
-        if (track.field === 'pagesRead') {
-          trackRows += `<div class="book-track"><span class="book-track-label">${track.label}</span><div class="book-track-bar"><div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${r(b.pagesRead)}%;background:${e.color}88"></div></div></div><span class="text-mono" style="font-size:11px">${b.pagesRead||0}</span></div>`;
-        } else if (track.field === 'pagesUnderlined') {
-          trackRows += `<div class="book-track"><span class="book-track-label">${track.label}</span><div class="book-track-bar"><div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${r(b.pagesUnderlined)}%;background:${e.color}bb"></div></div></div><span class="text-mono" style="font-size:11px">${b.pagesUnderlined||0}</span></div>`;
-        } else if (track.field === 'pagesStudied') {
-          trackRows += `<div class="book-track"><span class="book-track-label">${track.label}</span><div class="book-track-bar"><div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${r(b.pagesStudied)}%;background:${e.color}"></div></div></div><span class="text-mono" style="font-size:11px">${b.pagesStudied||0}</span></div>`;
+        if (track.field in pageAlpha) {
+          const f = track.field;
+          trackRows += `<div class="book-track"><span class="book-track-label">${track.label}</span><div class="book-track-bar"><div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${r(b[f])}%;background:${e.color}${pageAlpha[f]}"></div></div></div><span class="text-mono track-num-edit" style="font-size:11px" title="Clicca per modificare" onclick="event.stopPropagation();editTrackNumber(this,'${e.id}',${bi},'${f}')">${b[f]||0}</span></div>`;
         } else if (track.field === 'chapters' && tc) {
           trackRows += `<div class="chapter-tracks mt-8"><div class="chapter-badge">📚 Letti <span class="chapter-count">${b.chaptersRead||0}/${tc}</span></div><div class="chapter-badge">🃏 Anki <span class="chapter-count">${b.chaptersAnki||0}/${tc}</span></div><div class="chapter-badge">✅ Studiati <span class="chapter-count">${b.chaptersStudied||0}/${tc}</span></div></div>`;
         }
@@ -575,7 +573,6 @@ function renderExamCard(e,idx,total){
       <div class="book-progress-tracks">
         ${trackRows}
       </div>
-      <button class="btn-ghost mt-8" style="font-size:12px;padding:5px 10px" onclick="event.stopPropagation();openProgressModal('${e.id}',${bi})">Aggiorna progresso</button>
     </div>`;
   }).join('');
 
@@ -931,6 +928,54 @@ window.deleteExam=function(id){
   if(!confirm('Eliminare questo esame?'))return;
   state.exams=state.exams.filter(e=>e.id!==id);
   save(); renderSidebarExams(); renderExamsGrid(); renderDashboard();
+};
+
+// ===== INLINE PAGE NUMBER EDIT =====
+window.editTrackNumber=function(el,examId,bookIdx,field){
+  const exam=state.exams.find(e=>e.id===examId), book=exam?.books?.[bookIdx];
+  if(!book) return;
+  const input=document.createElement('input');
+  input.type='number'; input.min=0; input.value=book[field]||0;
+  input.className='track-num-input';
+  if(book.totalPages) input.max=book.totalPages;
+  input.onclick=ev=>ev.stopPropagation();
+  let done=false;
+  const finish=commit=>{
+    if(done) return; done=true;
+    if(commit){
+      let v=Math.max(0,parseInt(input.value,10)||0);
+      if(book.totalPages) v=Math.min(v,book.totalPages);
+      book[field]=v;
+      save(); renderDashboard();
+    }
+    renderExamsGrid();
+  };
+  input.onkeydown=ev=>{
+    if(ev.key==='Enter'){ev.preventDefault();finish(true);}
+    else if(ev.key==='Escape'){ev.preventDefault();finish(false);}
+  };
+  input.onblur=()=>finish(true);
+
+  const wrap=document.createElement('span');
+  wrap.className='track-num-wrap';
+  wrap.onclick=ev=>ev.stopPropagation();
+  wrap.appendChild(input);
+  [5,10,15].forEach(n=>{
+    const btn=document.createElement('button');
+    btn.type='button'; btn.className='track-num-step'; btn.textContent=`+${n}`;
+    // mousedown preventDefault keeps focus on the input so blur doesn't commit early
+    btn.onmousedown=ev=>ev.preventDefault();
+    btn.onclick=ev=>{
+      ev.stopPropagation();
+      let v=(parseInt(input.value,10)||0)+n;
+      if(book.totalPages) v=Math.min(v,book.totalPages);
+      input.value=v;
+      input.focus();
+    };
+    wrap.appendChild(btn);
+  });
+  el.replaceWith(wrap);
+  input.focus(); input.select();
 };
 
 // ===== PROGRESS MODAL =====
