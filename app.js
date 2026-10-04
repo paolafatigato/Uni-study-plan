@@ -98,7 +98,6 @@ onAuthStateChanged(auth, async user=>{
     const av=document.getElementById('userAvatar');
     av.src=user.photoURL||''; av.style.display=user.photoURL?'':'none';
     document.getElementById('userName').textContent=user.displayName||user.email||'';
-    document.getElementById('dashGreeting').textContent=`Ciao, ${(user.displayName||'Studente').split(' ')[0]}! 👋`;
     await loadFromFirestore(user.uid);
     renderAll();
   } else {
@@ -171,21 +170,90 @@ function itemRemaining(item) {
 }
 function unitLabel(u){ return u==='pp'?'Pagine':u==='slides'?'Slides':u==='min'?'Video':u; }
 function unitIcon(u){ return u==='pp'?'📖':u==='slides'?'🖥️':u==='min'?'🎬':''; }
-// Combined pace of a POOL of materials (possibly from different exams) sharing the same unit,
-// computed live for a given date: (sum of what's left across all of them) ÷ study-days left.
-// Finished materials drop out of the pool automatically.
+function unitWord(u, n){
+  if (u==='pp') return n===1?'pagina':'pagine';
+  if (u==='slides') return n===1?'slide':'slides';
+  if (u==='min') return n===1?'minuto':'minuti';
+  return u;
+}
+
+// ===== DAILY PROGRESS LOG =====
+// Every change to a material's counter (pagesRead / slidesDone / videoDone), from Esami or from the
+// Calendar, is recorded as a delta on that day: calendar[date].progress[matKey] = amount done that day.
+// This is what lets us say "today you did 7 of your 9 pages", whatever source they came from.
+// Books also log Sottolineate/Studiate under their own key (field suffix); "Lette" uses the plain key.
+const BOOK_PAGE_FIELDS = ['pagesRead','pagesUnderlined','pagesStudied'];
+function progressKey(item, field) { return field && field !== 'pagesRead' ? `${matKey(item)}|${field}` : matKey(item); }
+function logProgress(examId, type, bookIdx, delta, dateStr = today(), field = null) {
+  if (!delta) return;
+  if (!state.calendar[dateStr]) state.calendar[dateStr] = {};
+  const p = state.calendar[dateStr].progress || (state.calendar[dateStr].progress = {});
+  const k = progressKey({ examId, type, bookIdx }, field);
+  p[k] = (p[k] || 0) + delta;
+  if (!p[k]) delete p[k];
+}
+// Amount done on a day for one material. For a book = the metric you advanced most that day
+// (reading and underlining the same 5 pages counts 5, not 10).
+function progressOn(item, dateStr) {
+  const p = state.calendar[dateStr]?.progress; if (!p) return 0;
+  if (item.type !== 'book') return p[matKey(item)] || 0;
+  return Math.max(...BOOK_PAGE_FIELDS.map(f => p[progressKey(item, f)] || 0));
+}
+function progressSince(item, fromDate) {
+  const t = today(), k = matKey(item);
+  let sum = 0;
+  Object.keys(state.calendar).forEach(d => { if (d >= fromDate && d <= t) sum += state.calendar[d]?.progress?.[k] || 0; });
+  return sum;
+}
+
+// Combined pace of a POOL of materials (possibly from different exams) sharing the same unit:
+// (sum of what's left across all of them) ÷ study-days left.
+// For today/past days the target is frozen at the START of that day (progress logged since then is
+// added back), so reading pages doesn't lower today's target while you're doing it.
 function poolPaceOnDate(block, items, dateStr) {
   const allDays = blockDays(block);
-  if (allDays.indexOf(dateStr) === -1) return null;
+  const idx = allDays.indexOf(dateStr);
+  if (idx === -1) return null;
   const t = today();
-  const fromIdx = allDays.findIndex(d => d >= t);
+  const pastOrToday = dateStr <= t;
+  const fromIdx = pastOrToday ? idx : allDays.findIndex(d => d >= t);
   const daysLeft = fromIdx === -1 ? 1 : Math.max(1, allDays.length - fromIdx);
-  const enriched = items.map(it => ({ item: it, info: itemRemaining(it) })).filter(g => g.info);
-  const active = enriched.filter(g => (g.info.total - g.info.done) > 0);
+  const enriched = items.map(it => {
+    const info = itemRemaining(it); if (!info) return null;
+    const startRemaining = Math.max(0, info.total - info.done + (pastOrToday ? progressSince(it, dateStr) : 0));
+    return { item: it, info, startRemaining, doneOnDay: progressOn(it, dateStr) };
+  }).filter(Boolean);
+  const active = enriched.filter(g => g.startRemaining > 0);
   if (!active.length) return { done:true };
-  const totalRemaining = active.reduce((s,g)=>s+Math.max(0,g.info.total-g.info.done),0);
+  const totalRemaining = active.reduce((s,g)=>s+g.startRemaining,0);
   const perDay = Math.ceil(totalRemaining / daysLeft);
-  return { done:false, perDay, totalRemaining, daysLeft, active };
+  const doneOnDay = Math.max(0, enriched.reduce((s,g)=>s+g.doneOnDay,0));
+  return { done:false, perDay, totalRemaining, daysLeft, active, doneOnDay, met: doneOnDay >= perDay };
+}
+function blockPools(block) {
+  const groups = {};
+  (block.autoItems || []).forEach(it => { const info = itemRemaining(it); if (!info) return; (groups[info.unit] = groups[info.unit] || []).push(it); });
+  return groups;
+}
+// Has the block's goal for that day been reached? = every pool at its daily target + every task checked
+function blockDayStatus(block, dateStr) {
+  const dayData = state.calendar[dateStr] || {};
+  const tasks = block.tasks || [];
+  const groups = blockPools(block);
+  const paces = Object.keys(groups).map(unit => ({ unit, pace: poolPaceOnDate(block, groups[unit], dateStr) })).filter(p => p.pace);
+  const tasksDone = tasks.filter(t => dayData.completions?.[t.id]).length;
+  const hasGoals = tasks.length > 0 || paces.some(p => !p.pace.done);
+  const complete = hasGoals && tasksDone === tasks.length && paces.every(p => p.pace.done || p.pace.met);
+  return { hasGoals, complete, paces, tasksDone, tasksTotal: tasks.length };
+}
+// Friendly message for a pool: "obiettivo raggiunto", "ti manca solo 1 pagina!", ...
+function poolStatusMessage(pace, unit) {
+  const left = pace.perDay - pace.doneOnDay;
+  if (left <= 0) return { cls:'met', text: `✅ Obiettivo raggiunto per oggi!${left<0?` (+${-left} in più 💪)`:''}` };
+  if (left === 1) return { cls:'close', text: `Ti manca solo 1 ${unitWord(unit,1)}! 🔥` };
+  if (pace.doneOnDay === 0) return { cls:'todo', text: `Ancora da iniziare: ${pace.perDay} ${unitWord(unit,pace.perDay)} da fare` };
+  if (left <= Math.ceil(pace.perDay / 4)) return { cls:'close', text: `Quasi! Ti mancano solo ${left} ${unitWord(unit,left)}` };
+  return { cls:'todo', text: `Ti mancano ${left} ${unitWord(unit,left)}` };
 }
 function autoItemKey(block, item) { return `${block.id}|${item.examId}|${item.type}|${item.bookIdx ?? 'x'}`; }
 // Log the actual amount done for ONE material on a given date; updates that material's exam
@@ -200,17 +268,22 @@ window.applyAutoLog = function(dateStr, blockId, examId, type, bookIdxRaw, newAm
   if (!state.calendar[dateStr].autoLog) state.calendar[dateStr].autoLog = {};
   const prevApplied = state.calendar[dateStr].autoLog[key] || 0;
   const delta = newAmount - prevApplied;
+  let before = 0, after = 0;
   if (type === 'book') {
     const b = exam.books[bookIdx]; if (!b) return;
-    b.pagesRead = Math.min(b.totalPages || 0, Math.max(0, (b.pagesRead||0) + delta));
+    before = b.pagesRead || 0;
+    b.pagesRead = after = Math.min(b.totalPages || 0, Math.max(0, before + delta));
   } else if (type === 'slides') {
-    exam.slidesDone = Math.min(exam.slidesTotal || 0, Math.max(0, (exam.slidesDone||0) + delta));
+    before = exam.slidesDone || 0;
+    exam.slidesDone = after = Math.min(exam.slidesTotal || 0, Math.max(0, before + delta));
   } else if (type === 'video') {
-    exam.videoDone = Math.min(exam.videoTotal || 0, Math.max(0, (exam.videoDone||0) + delta));
+    before = exam.videoDone || 0;
+    exam.videoDone = after = Math.min(exam.videoTotal || 0, Math.max(0, before + delta));
   }
+  logProgress(examId, type, bookIdx, after - before, dateStr);
   state.calendar[dateStr].autoLog[key] = newAmount;
   save();
-  renderDashboard();
+  renderTodayGoals();
   if (document.getElementById('view-calendario')?.classList.contains('active')) {
     renderCalendar();
     if (state.selectedDay) renderDayPanel(state.selectedDay);
@@ -226,26 +299,30 @@ function renderAutoPoolRow(block, unit, items, dateStr, dayData) {
   if (pace.done) {
     return `<div class="day-auto-row done"><span class="day-auto-icon">${unitIcon(unit)}</span><span class="day-auto-label">${unitLabel(unit)}</span><span class="day-auto-donebadge">✓ finito</span></div>`;
   }
-  let sum = 0;
-  const rows = pace.active.map(({item,info})=>{
+  // "fatte" = everything logged that day (from Esami too); the inputs only hold the calendar's own share
+  let calendarSum = 0;
+  const rows = pace.active.map(({item,info,doneOnDay})=>{
     const key = autoItemKey(block, item);
     const logged = dayData.autoLog?.[key];
-    if (logged != null) sum += (+logged || 0);
+    if (logged != null) calendarSum += (+logged || 0);
     const val = (logged != null) ? logged : '';
+    const fromElsewhere = doneOnDay - (+logged || 0);
     return `<div class="day-auto-pool-item">
-      <span class="day-auto-pool-item-label" style="color:${info.examColor}">${info.label}<small> · ${info.examName}</small></span>
+      <span class="day-auto-pool-item-label" style="color:${info.examColor}">${info.label}<small> · ${info.examName}${fromElsewhere>0?` · +${fromElsewhere} da Esami`:''}</small></span>
       <input type="number" min="0" class="day-auto-pool-input" placeholder="0" title="Quante/i ${unit} hai fatto da qui oggi?"
         data-poolkey="${poolKey}" data-blockid="${block.id}" data-examid="${item.examId}" data-type="${item.type}" data-bookidx="${item.bookIdx ?? ''}" value="${val}">
     </div>`;
   }).join('');
   const singleItem = pace.active.length === 1;
-  return `<div class="day-auto-pool">
+  const status = poolStatusMessage(pace, unit);
+  return `<div class="day-auto-pool${pace.met?' met':''}">
     <div class="day-auto-pool-header">
       <span class="day-auto-icon">${unitIcon(unit)}</span>
       <span class="day-auto-label">${unitLabel(unit)}${pace.active.length>1?` <small>(${pace.active.length} fonti)</small>`:''}</span>
-      <span class="day-auto-target">oggi <strong>${pace.perDay}</strong> ${unit} <span class="day-auto-pool-sum" data-poolkey="${poolKey}">· inserite: ${sum}</span></span>
-      ${singleItem?`<button type="button" class="day-auto-pool-fillbtn" title="Segna ${pace.perDay} ${unit} come fatto" data-poolkey="${poolKey}" data-target="${pace.perDay}">✓</button>`:''}
+      <span class="day-auto-target">obiettivo <strong>${pace.perDay}</strong> ${unit} <span class="day-auto-pool-sum" data-poolkey="${poolKey}" data-base="${pace.doneOnDay - calendarSum}">· fatte: ${pace.doneOnDay}</span></span>
+      ${singleItem?`<button type="button" class="day-auto-pool-fillbtn" title="Segna ${pace.perDay} ${unit} come fatto" data-poolkey="${poolKey}" data-target="${Math.max(0, pace.perDay - (pace.doneOnDay - calendarSum))}">✓</button>`:''}
     </div>
+    <div class="goal-status ${status.cls}">${status.text}</div>
     <div class="day-auto-pool-items">${rows}</div>
   </div>`;
 }
@@ -264,8 +341,7 @@ function renderBlockDayContent(block, dateStr, dayData) {
     }).join('')}</div>`;
   }
   if (autoItems.length) {
-    const groups = {};
-    autoItems.forEach(it => { const info = itemRemaining(it); if (!info) return; (groups[info.unit] = groups[info.unit] || []).push(it); });
+    const groups = blockPools(block);
     html += `<div class="day-auto-list">${Object.keys(groups).map(unit=>renderAutoPoolRow(block,unit,groups[unit],dateStr,dayData)).join('')}</div>`;
   }
   if (!tasks.length && !autoItems.length) {
@@ -273,7 +349,7 @@ function renderBlockDayContent(block, dateStr, dayData) {
   }
   return html;
 }
-// Attach checkbox + numeric-input listeners after inserting block-day HTML (used by both Dashboard and Calendar)
+// Attach checkbox + numeric-input listeners after inserting block-day HTML (Calendar day panel)
 function attachBlockDayListeners(container, dateStr) {
   container.querySelectorAll('.day-task-cb').forEach(cb=>{
     cb.addEventListener('change',()=>{
@@ -281,7 +357,8 @@ function attachBlockDayListeners(container, dateStr) {
       if(!state.calendar[dateStr].completions)state.calendar[dateStr].completions={};
       state.calendar[dateStr].completions[cb.dataset.taskid]=cb.checked;
       cb.closest('label').classList.toggle('done',cb.checked);
-      save();renderCalendar();renderDashboard();
+      save();renderCalendar();renderTodayGoals();
+      if(state.selectedDay===dateStr) renderDayPanel(dateStr);
     });
   });
   container.querySelectorAll('.day-auto-pool-input').forEach(inp=>{
@@ -305,7 +382,7 @@ function updatePoolSumDisplay(container, poolKey) {
   const inputs = container.querySelectorAll(`.day-auto-pool-input[data-poolkey="${poolKey}"]`);
   let sum = 0; inputs.forEach(i=>sum += (+i.value || 0));
   const sumEl = container.querySelector(`.day-auto-pool-sum[data-poolkey="${poolKey}"]`);
-  if (sumEl) sumEl.textContent = `· inserite: ${sum}`;
+  if (sumEl) sumEl.textContent = `· fatte: ${(+sumEl.dataset.base || 0) + sum}`;
 }
 // Reference date used to show a block's "at a glance" pace on its card (today if within range, else next/last study day)
 function blockReferenceDate(block) {
@@ -382,7 +459,6 @@ document.querySelectorAll('.nav-btn').forEach(btn=>{
     document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
     document.getElementById('view-'+btn.dataset.view).classList.add('active');
     const v=btn.dataset.view;
-    if(v==='dashboard') renderDashboard();
     if(v==='esami')     renderExamsGrid();
     if(v==='piani')     renderPlanningView();
     if(v==='calendario'){renderCalendar();}
@@ -433,14 +509,7 @@ window.addEventListener('resize', () => {
     overlay.classList.remove('active');
   }
 });
-(()=>{
-  const d=new Date();
-  const days=['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
-  const months=['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
-  document.getElementById('headerDate').innerHTML=`<strong>${days[d.getDay()]}</strong><br>${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
-})();
-
-function renderAll(){ renderSidebarExams(); renderDashboard(); renderExamsGrid(); renderPlanningView(); }
+function renderAll(){ renderSidebarExams(); renderExamsGrid(); renderPlanningView(); }
 
 // ===== SIDEBAR =====
 function renderSidebarExams(){
@@ -453,77 +522,45 @@ window.goToExam=function(id){
   setTimeout(()=>document.getElementById('exam-card-'+id)?.scrollIntoView({behavior:'smooth',block:'start'}),100);
 };
 
-// ===== DASHBOARD =====
-function renderDashboard(){ renderTodayTasks(); renderProgressBars(); renderUpcoming(); }
-
-function renderTodayTasks(){
-  const el=document.getElementById('todayTasks');
-  const t=today(); const dayData=state.calendar[t]||{};
+// ===== OBIETTIVI DI OGGI (Pianifica) =====
+// For every block active today: pages/slides/minutes done today (logged from Esami or Calendar)
+// against the block's daily target, split across any of its sources.
+function renderTodayGoals(){
+  const el=document.getElementById('todayGoals'); if(!el)return;
+  const t=today();
   const todayBlocks=blocksForDate(t);
-  const examsWithPace=state.exams.filter(e=>examDailyPace(e));
-  if(!todayBlocks.length&&!examsWithPace.length){
-    el.innerHTML='<p style="color:var(--ink-light);font-size:13px;padding:8px 0;">Nessun blocco attivo oggi e nessun appello impostato.</p>';
+  if(!todayBlocks.length){
+    el.innerHTML='<p style="color:var(--ink-light);font-size:13px;padding:4px 0">Nessun blocco di studio attivo oggi. Goditi la pausa! ☕</p>';
     return;
   }
-  let html='';
-  // Block tasks + auto-calculated pages/activities for today
-  todayBlocks.forEach(block=>{
-    html+=`<div class="day-block-section" style="border-left:3px solid ${block.color}">
-      <div class="day-block-name">${block.label}</div>
-      ${renderBlockDayContent(block,t,dayData)}
-    </div>`;
-  });
-  // Exam paces (informational, based on chosen appello date)
-  examsWithPace.forEach(e=>{
-    const pace=examDailyPace(e);
-    html+=`<div class="today-task">
-      <div class="today-task-color" style="background:${e.color}"></div>
-      <div class="today-task-info">
-        <div class="today-task-name">${e.name}</div>
-        <div class="today-task-sub">⚡ Appello ${fmt(pace.date)}: ${pace.items.map(i=>`<strong>${i.perDay} ${i.unit}/g</strong> ${i.label}`).join(' · ')}</div>
+  el.innerHTML=todayBlocks.map(block=>{
+    const st=blockDayStatus(block,t);
+    const poolsHtml=st.paces.map(({unit,pace})=>{
+      if(pace.done) return `<div class="goal-pool"><div class="goal-pool-head"><span>${unitIcon(unit)} <strong>${unitLabel(unit)}</strong></span><span class="goal-status met">✓ Tutto finito!</span></div></div>`;
+      const pct=Math.min(100,Math.round(pace.doneOnDay/pace.perDay*100));
+      const status=poolStatusMessage(pace,unit);
+      const sources=pace.active.filter(g=>g.doneOnDay>0)
+        .map(g=>`<span class="goal-source" style="border-color:${g.info.examColor}">${g.info.label} <strong>+${g.doneOnDay}</strong></span>`).join('');
+      return `<div class="goal-pool">
+        <div class="goal-pool-head">
+          <span>${unitIcon(unit)} <strong>${unitLabel(unit)}</strong>${pace.active.length>1?` <small>(${pace.active.length} fonti)</small>`:''}</span>
+          <span class="goal-count"><strong>${pace.doneOnDay}</strong> / ${pace.perDay} ${unit}</span>
+        </div>
+        <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${pct}%;background:${pace.met?'var(--sea-green)':block.color}"></div></div>
+        <div class="goal-status ${status.cls}">${status.text}</div>
+        ${sources?`<div class="goal-sources">${sources}</div>`:''}
+      </div>`;
+    }).join('');
+    const tasksHtml=st.tasksTotal?`<div class="goal-tasks${st.tasksDone===st.tasksTotal?' met':''}">✔️ Attività spuntate: <strong>${st.tasksDone}/${st.tasksTotal}</strong> <small>(dal Calendario)</small></div>`:'';
+    return `<div class="goal-block${st.complete?' complete':''}" style="border-left:4px solid ${block.color}">
+      <div class="goal-block-head">
+        <span class="goal-block-name">${block.label}</span>
+        ${st.complete?'<span class="goal-block-badge">✅ Obiettivo di oggi raggiunto!</span>':''}
       </div>
-      <div class="today-task-pages">${pace.daysLeft}gg</div>
-    </div>`;
-  });
-  el.innerHTML = html || '<p style="color:var(--ink-light);font-size:13px;">Nessun dato per oggi.</p>';
-  attachBlockDayListeners(el, t);
-}
-
-function renderProgressBars(){
-  const el=document.getElementById('progressBars');
-  if(!state.exams.length){el.innerHTML='<p style="color:var(--ink-light);font-size:13px;">Aggiungi un esame.</p>';return;}
-  el.innerHTML=state.exams.map(e=>{
-    const pct=Math.round(examProgress(e)*100);
-    return `<div class="progress-item">
-      <div class="progress-header"><span class="progress-name">${e.name}</span><span class="progress-pct">${pct}%</span></div>
-      <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${pct}%;background:${e.color}"></div></div>
+      ${poolsHtml}${tasksHtml}
+      ${!st.hasGoals?'<p style="font-size:12px;color:var(--ink-light)">Nessun obiettivo in questo blocco.</p>':''}
     </div>`;
   }).join('');
-}
-
-function renderUpcoming(){
-  const el=document.getElementById('upcomingExams');
-  let appells=[];
-  state.exams.forEach(e=>(e.appells||[]).forEach(a=>appells.push({date:a.date,chosen:a.chosen,name:e.name,color:e.color})));
-  appells.sort((a,b)=>a.date.localeCompare(b.date));
-  const future=appells.filter(a=>a.date>=today()).slice(0,6);
-  if(!future.length){el.innerHTML='<p style="color:var(--ink-light);font-size:13px;">Nessun appello imminente.</p>';return;}
-  el.innerHTML=future.map(a=>{
-    const du=daysUntil(a.date);
-    return `<div class="upcoming-item">
-      <div class="upcoming-date">${fmt(a.date)} · ${du===0?'oggi':du+' giorni'}</div>
-      <div class="upcoming-name" style="color:${a.color}">${a.name}</div>
-      ${a.chosen?'<div class="upcoming-chosen">✓ Appello scelto</div>':''}
-    </div>`;
-  }).join('');
-}
-
-function examProgress(exam){
-  let total=0,done=0;
-  (exam.books||[]).forEach(b=>{const tp=b.totalPages||0;total+=tp*3;done+=Math.min(b.pagesRead||0,tp)+Math.min(b.pagesUnderlined||0,tp)+Math.min(b.pagesStudied||0,tp);});
-  if(exam.hasSlides){total+=exam.slidesTotal||0;done+=Math.min(exam.slidesDone||0,exam.slidesTotal||0);}
-  if(exam.hasVideo) {total+=exam.videoTotal||0; done+=Math.min(exam.videoDone||0,exam.videoTotal||0);}
-  return total?done/total:0;
 }
 
 // ===== EXAMS GRID =====
@@ -537,7 +574,7 @@ window.moveExam=function(id,dir){
   const newIdx=idx+dir; if(newIdx<0||newIdx>=state.exams.length)return;
   const [item]=state.exams.splice(idx,1);
   state.exams.splice(newIdx,0,item);
-  save(); renderSidebarExams(); renderExamsGrid(); renderDashboard();
+  save(); renderSidebarExams(); renderExamsGrid(); renderTodayGoals();
 };
 
 function renderExamCard(e,idx,total){
@@ -904,9 +941,15 @@ document.getElementById('saveExamBtn').addEventListener('click',()=>{
     videoDone:+document.getElementById('videoDone').value||0,
     completed:existingExam?.completed||false,
   };
+  // Whatever was added/removed today to pages/slides/video counts toward today's goals
+  if(existingExam){
+    exam.books.forEach((b,i)=>BOOK_PAGE_FIELDS.forEach(f=>logProgress(exam.id,'book',i,(b[f]||0)-(existingExam.books?.[i]?.[f]||0),today(),f)));
+    logProgress(exam.id,'slides',null,exam.slidesDone-(existingExam.slidesDone||0));
+    logProgress(exam.id,'video',null,exam.videoDone-(existingExam.videoDone||0));
+  }
   if(state.editingExamId){const i=state.exams.findIndex(e=>e.id===state.editingExamId);if(i>=0)state.exams[i]=exam;}
   else state.exams.push(exam);
-  save(); closeModal('examModal'); renderSidebarExams(); renderExamsGrid(); renderDashboard();
+  save(); closeModal('examModal'); renderSidebarExams(); renderExamsGrid(); renderTodayGoals();
 });
 window.completeExam=function(id){
   const idx=state.exams.findIndex(e=>e.id===id); if(idx<0)return;
@@ -922,12 +965,12 @@ window.completeExam=function(id){
     if(firstCompletedIdx===-1) state.exams.push(item);
     else state.exams.splice(firstCompletedIdx,0,item);
   }
-  save(); renderSidebarExams(); renderExamsGrid(); renderDashboard();
+  save(); renderSidebarExams(); renderExamsGrid(); renderTodayGoals();
 };
 window.deleteExam=function(id){
   if(!confirm('Eliminare questo esame?'))return;
   state.exams=state.exams.filter(e=>e.id!==id);
-  save(); renderSidebarExams(); renderExamsGrid(); renderDashboard();
+  save(); renderSidebarExams(); renderExamsGrid(); renderTodayGoals();
 };
 
 // ===== INLINE PAGE NUMBER EDIT =====
@@ -945,8 +988,9 @@ window.editTrackNumber=function(el,examId,bookIdx,field){
     if(commit){
       let v=Math.max(0,parseInt(input.value,10)||0);
       if(book.totalPages) v=Math.min(v,book.totalPages);
+      if(BOOK_PAGE_FIELDS.includes(field)) logProgress(examId,'book',bookIdx,v-(book[field]||0),today(),field);
       book[field]=v;
-      save(); renderDashboard();
+      save(); renderTodayGoals();
     }
     renderExamsGrid();
   };
@@ -993,15 +1037,18 @@ window.openProgressModal=function(examId,bookIdx){
     <div class="form-group"><label>Capitoli Anki</label><input type="number" id="pm-chapanki" value="${book.chaptersAnki||0}"></div>
     <div class="form-group"><label>Capitoli studiati</label><input type="number" id="pm-chapstudied" value="${book.chaptersStudied||0}"></div>`:''}`;
   document.getElementById('saveProgressBtn').onclick=()=>{
-    if(has('pages_read')) book.pagesRead=+document.getElementById('pm-pagesread')?.value||0;
-    if(has('pages_underlined')) book.pagesUnderlined=+document.getElementById('pm-pagesunderlined')?.value||0;
-    if(has('pages_studied')) book.pagesStudied=+document.getElementById('pm-pagesstudied')?.value||0;
+    [['pages_read','pagesRead','pm-pagesread'],['pages_underlined','pagesUnderlined','pm-pagesunderlined'],['pages_studied','pagesStudied','pm-pagesstudied']].forEach(([id,f,inputId])=>{
+      if(!has(id))return;
+      const v=+document.getElementById(inputId)?.value||0;
+      logProgress(examId,'book',bookIdx,v-(book[f]||0),today(),f);
+      book[f]=v;
+    });
     if(has('chapters')&&book.totalChapters){
       book.chaptersRead=+document.getElementById('pm-chapread')?.value||0;
       book.chaptersAnki=+document.getElementById('pm-chapanki')?.value||0;
       book.chaptersStudied=+document.getElementById('pm-chapstudied')?.value||0;
     }
-    save(); closeModal('progressModal'); renderExamsGrid(); renderDashboard();
+    save(); closeModal('progressModal'); renderExamsGrid(); renderTodayGoals();
   };
   openModal('progressModal');
 };
@@ -1021,6 +1068,7 @@ function renderPlanningView(){
     state.exams.map(e=>`<option value="${e.id}"${e.id===cur?' selected':''}>${e.name}</option>`).join('');
   simSel.onchange=()=>renderSimResults();
   renderSimRows(); renderSimResults();
+  renderTodayGoals();
   const el=document.getElementById('blocksGrid'); if(!el)return;
   if(!state.studyBlocks.length){
     el.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><div class="empty-state-icon">📋</div><p>Nessun blocco ancora.</p><button class="btn-primary" style="margin-top:12px" onclick="openBlockModal(null)">+ Crea il primo blocco</button></div>`;
@@ -1036,8 +1084,7 @@ function renderPlanningView(){
     const refDate=blockReferenceDate(block);
     let autoHtml='';
     if(refDate&&(block.autoItems||[]).length){
-      const groups={};
-      block.autoItems.forEach(it=>{ const info=itemRemaining(it); if(!info)return; (groups[info.unit]=groups[info.unit]||[]).push(it); });
+      const groups=blockPools(block);
       autoHtml=Object.keys(groups).map(unit=>{
         const pace=poolPaceOnDate(block,groups[unit],refDate);
         if(!pace)return'';
@@ -1325,19 +1372,19 @@ function renderCalendar(){
   for(let i=startOffset-1;i>=0;i--) html+=`<div class="cal-day other-month"><span class="cal-day-num">${daysInPrev-i}</span></div>`;
   for(let d=1;d<=daysInMonth;d++){
     const ds=`${state.calYear}-${String(state.calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const dayData=state.calendar[ds]||{};
     const dayBlocks=dateBlockMap[ds]||[];
     const isActive=dayBlocks.length>0;
     const isToday=ds===todayStr;
     const appellExams=state.exams.filter(e=>(e.appells||[]).some(a=>a.date===ds));
-    let pills='';
+    let pills='', anyDone=false;
     const seen=new Set();
     dayBlocks.forEach(block=>{
       if(seen.has(block.id))return;seen.add(block.id);
-      const allDone=(block.tasks||[]).length>0&&(block.tasks||[]).every(t=>dayData.completions?.[t.id]);
-      pills+=`<span class="cal-pill" style="background:${block.color};opacity:${allDone?1:0.75}">${allDone?'✓ ':''}${block.label.split(' ')[0]}</span>`;
+      const allDone=ds<=todayStr&&blockDayStatus(block,ds).complete;
+      if(allDone) anyDone=true;
+      pills+=`<span class="cal-pill${allDone?' done':''}" style="background:${block.color};opacity:${allDone?1:0.75}" title="${allDone?'Obiettivi del blocco raggiunti ✓':''}">${allDone?'✓ ':''}${block.label.split(' ')[0]}</span>`;
     });
-    const cls=['cal-day',isToday?'today':'',isActive?'study-day':'',appellExams.length?'has-appell':''].filter(Boolean).join(' ');
+    const cls=['cal-day',isToday?'today':'',isActive?'study-day':'',appellExams.length?'has-appell':'',anyDone?'goal-done':''].filter(Boolean).join(' ');
     html+=`<div class="${cls}" onclick="handleDayClick('${ds}')"><span class="cal-day-num">${d}</span><div class="cal-day-pills">${pills}</div></div>`;
   }
   const rem=(7-(startOffset+daysInMonth)%7)%7;
@@ -1366,8 +1413,9 @@ function renderDayPanel(dateStr){
     blocksHtml=dayBlocks.map(block=>{
       const tasks=block.tasks||[];
       const doneCnt=tasks.filter(t=>dayData.completions?.[t.id]).length;
+      const complete=dateStr<=today()&&blockDayStatus(block,dateStr).complete;
       return `<div class="day-block-section" style="border-left:3px solid ${block.color}">
-        <div class="day-block-name">${block.label}${tasks.length?` <small>(${doneCnt}/${tasks.length})</small>`:''}</div>
+        <div class="day-block-name">${block.label}${tasks.length?` <small>(${doneCnt}/${tasks.length})</small>`:''}${complete?' <span class="goal-block-badge">✅ Obiettivi raggiunti</span>':''}</div>
         ${renderBlockDayContent(block,dateStr,dayData)}
       </div>`;
     }).join('');

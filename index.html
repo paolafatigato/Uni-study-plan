@@ -35,7 +35,6 @@
     <button class="sidebar-toggle" id="sidebarToggle" title="Chiudi menu">‹</button>
   </div>
   <nav class="sidebar-nav">
-    <button class="nav-btn" data-view="dashboard"><span class="nav-icon">🏠</span><span class="nav-label">Dashboard</span></button>
     <button class="nav-btn active" data-view="esami"><span class="nav-icon">🎓</span><span class="nav-label">Esami</span></button>
     <button class="nav-btn" data-view="piani"><span class="nav-icon">�</span><span class="nav-label">Pianifica</span></button>
     <button class="nav-btn" data-view="calendario"><span class="nav-icon">📅</span><span class="nav-label">Calendario</span></button>
@@ -57,19 +56,6 @@
   <!-- Mobile hamburger menu -->
   <button class="mobile-hamburger" id="mobileHamburger" title="Apri menu">☰</button>
 
-  <!-- DASHBOARD -->
-  <section class="view" id="view-dashboard">
-    <header class="page-header">
-      <div><h1 id="dashGreeting">Ciao! 👋</h1><p class="subtitle">Ecco il tuo studio di oggi</p></div>
-      <div class="header-date" id="headerDate"></div>
-    </header>
-    <div class="dashboard-grid">
-      <div class="dash-card dash-today"><h3>📖 Da fare oggi</h3><div id="todayTasks"></div></div>
-      <div class="dash-card dash-progress"><h3>📊 Avanzamento generale</h3><div id="progressBars"></div></div>
-      <div class="dash-card dash-upcoming"><h3>🗓️ Prossimi appelli</h3><div id="upcomingExams"></div></div>
-    </div>
-  </section>
-
   <!-- ESAMI -->
   <section class="view active" id="view-esami">
     <header class="page-header">
@@ -85,6 +71,15 @@
       <div><h1>📐 Pianifica</h1><p class="subtitle">Simula scenari e crea blocchi di studio con attività quotidiane</p></div>
       <button class="btn-primary" id="btnAddBlock" onclick="openBlockModal(null)">+ Nuovo blocco</button>
     </header>
+
+    <!-- Today's goals -->
+    <div class="sim-section today-goals-section">
+      <div class="sim-section-header">
+        <h3>✅ Obiettivi di oggi</h3>
+        <p class="sim-section-sub">Calcolato dalle pagine che inserisci oggi in <strong>Esami</strong> (o dal Calendario), divise come vuoi tra le fonti del blocco</p>
+      </div>
+      <div id="todayGoals"></div>
+    </div>
 
     <!-- Scenario simulator -->
     <div class="sim-section">

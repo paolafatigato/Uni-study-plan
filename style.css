@@ -296,14 +296,6 @@ body {
   font-size: 14px;
 }
 
-.header-date {
-  font-family: 'DM Mono', monospace;
-  font-size: 13px;
-  color: var(--ink-light);
-  text-align: right;
-  padding-top: 4px;
-}
-
 /* ======= BUTTONS ======= */
 .btn-primary {
   background: var(--racing-red);
@@ -346,51 +338,6 @@ body {
 .btn-icon:hover { background: var(--parchment); color: var(--ink); }
 .btn-icon.completed { color: #2e7d32; font-weight: bold; }
 
-/* ======= DASHBOARD ======= */
-.dashboard-grid {
-  display: grid;
-  grid-template-columns: 1.2fr 1fr 0.8fr;
-  gap: 20px;
-}
-
-.dash-card {
-  background: #fff;
-  border-radius: var(--radius);
-  padding: 24px;
-  box-shadow: var(--shadow);
-  border: 1px solid var(--border);
-}
-
-.dash-card h3 {
-  font-family: 'DM Serif Display', serif;
-  font-size: 17px;
-  margin-bottom: 16px;
-  color: var(--ink);
-}
-
-.today-task {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border);
-  font-size: 14px;
-}
-.today-task:last-child { border-bottom: none; }
-.today-task-color { width: 4px; height: 36px; border-radius: 2px; flex-shrink: 0; }
-.today-task-info { flex: 1; }
-.today-task-name { font-weight: 600; font-size: 13px; }
-.today-task-sub { color: var(--ink-light); font-size: 12px; margin-top: 2px; }
-.today-task-pages {
-  font-family: 'DM Mono', monospace;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--racing-red);
-  white-space: nowrap;
-}
-
-.progress-item { margin-bottom: 14px; }
-.progress-item:last-child { margin-bottom: 0; }
 .progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .progress-name { font-size: 13px; font-weight: 600; }
 .progress-pct {
@@ -408,25 +355,6 @@ body {
   height: 100%;
   border-radius: 4px;
   transition: width 0.6s ease;
-}
-
-.upcoming-item {
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
-}
-.upcoming-item:last-child { border-bottom: none; }
-.upcoming-date {
-  font-family: 'DM Mono', monospace;
-  font-size: 12px;
-  color: var(--ink-light);
-}
-.upcoming-name { font-weight: 600; margin-top: 2px; }
-.upcoming-chosen {
-  font-size: 11px;
-  color: var(--sea-green);
-  font-weight: 600;
-  margin-top: 2px;
 }
 
 /* ======= EXAMS GRID ======= */
@@ -1201,8 +1129,6 @@ input:focus, select:focus, textarea:focus {
 
 /* ======= RESPONSIVE ======= */
 @media (max-width: 960px) {
-  .dashboard-grid { grid-template-columns: 1fr 1fr; }
-  .dash-upcoming { grid-column: 1 / -1; }
   .calendar-layout { grid-template-columns: 1fr; }
 }
 
@@ -1227,7 +1153,6 @@ input:focus, select:focus, textarea:focus {
   .sidebar-toggle {
     display: flex;
   }
-  .dashboard-grid { grid-template-columns: 1fr; }
   .form-row { flex-direction: column; }
   .sidebar-header {
     padding: 16px 12px;
@@ -1769,11 +1694,6 @@ textarea { resize: vertical; min-height: 80px; }
 .pace-chip strong { color: var(--racing-red); font-family: 'DM Mono', monospace; }
 .pace-chip small { color: var(--ink-light); }
 
-/* ======= TODAY TASK DONE STATE ======= */
-.today-task.done .today-task-name,
-.today-task.done .today-task-sub { opacity: 0.5; text-decoration: line-through; }
-.today-task-done { color: var(--sea-green); font-size: 16px; font-weight: 700; flex-shrink: 0; }
-
 /* ======= PLANNING VIEW ======= */
 .sim-section {
   background: #fff;
@@ -2067,7 +1987,7 @@ textarea { resize: vertical; min-height: 80px; }
 .block-material-pace { color: var(--ink-light); font-size: 12px; margin-left: auto; text-align: right; }
 .block-material-pace strong { color: var(--racing-red); font-family: 'DM Mono', monospace; }
 
-/* ======= AUTO ITEMS — Dashboard & Calendar day panel ======= */
+/* ======= AUTO ITEMS — Calendar day panel ======= */
 .day-auto-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; max-width: 100%; }
 .day-auto-row {
   display: flex;
@@ -2161,3 +2081,54 @@ textarea { resize: vertical; min-height: 80px; }
 }
 .day-auto-pool-input::-webkit-outer-spin-button,
 .day-auto-pool-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+/* ======= OBIETTIVI DI OGGI (Pianifica) ======= */
+.today-goals-section #todayGoals { display: flex; flex-direction: column; gap: 12px; }
+.goal-block {
+  background: var(--ivory);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.goal-block.complete { background: #f2f9f4; border-color: var(--sea-green); }
+.goal-block-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
+.goal-block-name { font-weight: 700; font-size: 15px; color: var(--ink); }
+.goal-block-badge {
+  background: var(--sea-green);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.goal-pool { display: flex; flex-direction: column; gap: 6px; }
+.goal-pool-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 13px; }
+.goal-pool-head small { color: var(--ink-light); }
+.goal-count { font-family: 'DM Mono', monospace; font-size: 13px; color: var(--ink-mid); }
+.goal-count strong { color: var(--ink); font-size: 15px; }
+.goal-status { font-size: 13px; font-weight: 600; }
+.goal-status.met { color: var(--sea-green); }
+.goal-status.close { color: #e65100; }
+.goal-status.todo { color: var(--ink-light); font-weight: 500; }
+.day-auto-pool .goal-status { margin-top: 6px; font-size: 12px; }
+.day-auto-pool.met { border-color: var(--sea-green); background: #f2f9f4; }
+.goal-sources { display: flex; flex-wrap: wrap; gap: 6px; }
+.goal-source {
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink-mid);
+}
+.goal-source strong { font-family: 'DM Mono', monospace; color: var(--ink); }
+.goal-tasks { font-size: 13px; color: var(--ink-mid); }
+.goal-tasks.met { color: var(--sea-green); }
+.goal-tasks small { color: var(--ink-light); }
+
+/* Calendar: day whose block goals were reached */
+.cal-pill.done { box-shadow: 0 0 0 1.5px var(--sea-green); }
+.cal-day.goal-done .cal-day-num::after { content: ' ✓'; color: var(--sea-green); font-weight: 700; }
